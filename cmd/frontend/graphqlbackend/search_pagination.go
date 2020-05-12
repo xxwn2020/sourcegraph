@@ -132,7 +132,7 @@ func (r *searchResolver) paginatedResults(ctx context.Context) (result *SearchRe
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	repos, missingRepoRevs, alertResult, err := r.determineRepos(ctx, tr, start)
+	repos, missingRepoRevs, _, alertResult, err := r.determineRepos(ctx, tr, start)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,13 @@ func (r *searchResolver) paginatedResults(ctx context.Context) (result *SearchRe
 	}
 	common.update(*fileCommon)
 
-	tr.LazyPrintf("results=%d limitHit=%v cloning=%d missing=%d timedout=%d", len(results), common.limitHit, len(common.cloning), len(common.missing), len(common.timedout))
+	tr.LazyPrintf("results=%d limitHit=%v cloning=%d missing=%d excluded=%d timedout=%d",
+		len(results),
+		common.limitHit,
+		len(common.cloning),
+		len(common.missing),
+		len(common.excluded),
+		len(common.timedout))
 
 	// Alert is a potential alert shown to the user.
 	var alert *searchAlert
@@ -559,6 +565,7 @@ func sliceSearchResultsCommon(common *searchResultsCommon, firstResultRepo, last
 	final.indexed = doAppend(final.indexed, common.indexed)
 	final.cloning = doAppend(final.cloning, common.cloning)
 	final.missing = doAppend(final.missing, common.missing)
+	final.missing = doAppend(final.excluded, common.excluded)
 	final.timedout = doAppend(final.timedout, common.timedout)
 	return final
 }

@@ -39,7 +39,7 @@ import (
 
 // This file contains the root resolver for search. It currently has a lot of
 // logic that spans out into all the other search_* files.
-var mockResolveRepositories func(effectiveRepoFieldValues []string) (repoRevs, missingRepoRevs []*search.RepositoryRevisions, overLimit bool, err error)
+var mockResolveRepositories func(effectiveRepoFieldValues []string) (repoRevs, missingRepoRevs, excludedRepoRevs []*search.RepositoryRevisions, overLimit bool, err error)
 
 func maxReposToSearch() int {
 	switch max := conf.Get().MaxReposToSearch; {
@@ -87,6 +87,8 @@ func NewSearchImplementer(args *SearchArgs) (SearchImplementer, error) {
 	} else {
 		queryString = args.Query
 	}
+
+	log15.Info("yo", "foo", "qux")
 
 	var queryInfo query.QueryInfo
 	if conf.AndOrQueryEnabled() && searchType != query.SearchTypeLiteral && query.ContainsAndOrKeyword(args.Query) {
@@ -243,10 +245,10 @@ type searchResolver struct {
 	versionContext *string
 
 	// Cached resolveRepositories results.
-	reposMu                   sync.Mutex
-	repoRevs, missingRepoRevs []*search.RepositoryRevisions
-	repoOverLimit             bool
-	repoErr                   error
+	reposMu                                     sync.Mutex
+	repoRevs, missingRepoRevs, excludedRepoRevs []*search.RepositoryRevisions
+	repoOverLimit                               bool
+	repoErr                                     error
 
 	zoekt        *searchbackend.Zoekt
 	searcherURLs *endpoint.Map
@@ -367,7 +369,7 @@ func exactlyOneRepo(repoFilters []string) bool {
 
 // resolveRepositories calls doResolveRepositories, caching the result for the common
 // case where effectiveRepoFieldValues == nil.
-func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoFieldValues []string) (repoRevs, missingRepoRevs []*search.RepositoryRevisions, overLimit bool, err error) {
+func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoFieldValues []string) (repoRevs, missingRepoRevs, excludedRepoRevs []*search.RepositoryRevisions, overLimit bool, err error) {
 	if mockResolveRepositories != nil {
 		return mockResolveRepositories(effectiveRepoFieldValues)
 	}
@@ -377,16 +379,20 @@ func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoF
 		if err != nil {
 			tr.SetError(err)
 		} else {
-			tr.LazyPrintf("numRepoRevs: %d, numMissingRepoRevs: %d, overLimit: %v", len(repoRevs), len(missingRepoRevs), overLimit)
+			tr.LazyPrintf("numRepoRevs: %d, numMissingRepoRevs: %d, numExcludedRepoRevs: %d, overLimit: %v",
+				len(repoRevs),
+				len(missingRepoRevs),
+				len(excludedRepoRevs),
+				overLimit)
 		}
 		tr.Finish()
 	}()
 	if effectiveRepoFieldValues == nil {
 		r.reposMu.Lock()
 		defer r.reposMu.Unlock()
-		if r.repoRevs != nil || r.missingRepoRevs != nil || r.repoErr != nil {
+		if r.repoRevs != nil || r.missingRepoRevs != nil || r.excludedRepoRevs != nil || r.repoErr != nil {
 			tr.LazyPrintf("cached")
-			return r.repoRevs, r.missingRepoRevs, r.repoOverLimit, r.repoErr
+			return r.repoRevs, r.missingRepoRevs, r.excludedRepoRevs, r.repoOverLimit, r.repoErr
 		}
 	}
 
@@ -398,7 +404,7 @@ func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoF
 
 	settings, err := decodedViewerFinalSettings(ctx)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 	var settingForks, settingArchived bool
 	if v := settings.SearchIncludeForks; v != nil {
@@ -437,7 +443,7 @@ func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoF
 	}
 
 	tr.LazyPrintf("resolveRepositories - start")
-	repoRevs, missingRepoRevs, overLimit, err = resolveRepositories(ctx, resolveRepoOp{
+	repoRevs, missingRepoRevs, excludedRepoRevs, overLimit, err = resolveRepositories(ctx, resolveRepoOp{
 		repoFilters:        repoFilters,
 		minusRepoFilters:   minusRepoFilters,
 		repoGroupFilters:   repoGroupFilters,
@@ -450,14 +456,52 @@ func (r *searchResolver) resolveRepositories(ctx context.Context, effectiveRepoF
 		onlyPublic:         visibility == query.Public,
 		commitAfter:        commitAfter,
 	})
+	log15.Info("yo", "before invalid check", "xx")
+	forkStr, _ = r.query.StringValue(query.FieldFork)
+	fork = parseYesNoOnly(forkStr)
+	log15.Info("fork", "fork", fork)
+	if fork == Invalid { // fixme, setting?
+		// fork: was not specified and forks are excluded,
+		// find out which repos are excluded.
+		excludedForks, _, _, _, _ := resolveRepositories(ctx, resolveRepoOp{
+			repoFilters:        repoFilters,
+			minusRepoFilters:   minusRepoFilters,
+			repoGroupFilters:   repoGroupFilters,
+			versionContextName: versionContextName,
+			onlyForks:          true,
+			onlyPrivate:        visibility == query.Private,
+			onlyPublic:         visibility == query.Public,
+			commitAfter:        commitAfter,
+		})
+		log15.Info("sup", "exclude", len(excludedForks))
+		excludedRepoRevs = append(excludedRepoRevs, excludedForks...)
+	}
+	if archived == Invalid { // fixme, setting?
+		// archived: was not specified and archives are excluded,
+		// find out which repos are excluded.
+		excludedArchived, _, _, _, _ := resolveRepositories(ctx, resolveRepoOp{
+			repoFilters:        repoFilters,
+			minusRepoFilters:   minusRepoFilters,
+			repoGroupFilters:   repoGroupFilters,
+			versionContextName: versionContextName,
+			onlyArchived:       true,
+			onlyPrivate:        visibility == query.Private,
+			onlyPublic:         visibility == query.Public,
+			commitAfter:        commitAfter,
+		})
+		excludedRepoRevs = append(excludedRepoRevs, excludedArchived...)
+	}
 	tr.LazyPrintf("resolveRepositories - done")
 	if effectiveRepoFieldValues == nil {
 		r.repoRevs = repoRevs
 		r.missingRepoRevs = missingRepoRevs
+		r.excludedRepoRevs = excludedRepoRevs
 		r.repoOverLimit = overLimit
 		r.repoErr = err
 	}
-	return repoRevs, missingRepoRevs, overLimit, err
+	log15.Info("size", "excluded", len(excludedRepoRevs))
+	log15.Info("7", "r.excluded", len(r.excludedRepoRevs))
+	return repoRevs, missingRepoRevs, excludedRepoRevs, overLimit, err
 }
 
 // a patternRevspec maps an include pattern to a list of revisions
@@ -567,7 +611,7 @@ type resolveRepoOp struct {
 	onlyPublic         bool
 }
 
-func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, missingRepoRevisions []*search.RepositoryRevisions, overLimit bool, err error) {
+func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, missingRepoRevisions, excludedRepoRevisions []*search.RepositoryRevisions, overLimit bool, err error) {
 	tr, ctx := trace.New(ctx, "resolveRepositories", fmt.Sprintf("%+v", op))
 	defer func() {
 		tr.SetError(err)
@@ -590,7 +634,7 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 	if groupNames := op.repoGroupFilters; len(groupNames) > 0 {
 		groups, err := resolveRepoGroups(ctx)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, nil, false, err
 		}
 		var patterns []string
 		for _, groupName := range groupNames {
@@ -610,7 +654,7 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 	// revision specs, if they had any.
 	includePatternRevs, err := findPatternRevs(includePatterns)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 
 	// If a version context is specified, gather the list of repository names
@@ -621,7 +665,7 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 	if len(includePatternRevs) == 0 && op.versionContextName != "" {
 		versionContext, err = resolveVersionContext(op.versionContextName)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, nil, false, err
 		}
 
 		for _, revision := range versionContext.Revisions {
@@ -636,7 +680,7 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 		}
 		defaultRepos, err = defaultRepositories(ctx, db.DefaultRepos.List, getIndexedRepos)
 		if err != nil {
-			return nil, nil, false, errors.Wrap(err, "getting list of default repos")
+			return nil, nil, nil, false, errors.Wrap(err, "getting list of default repos")
 		}
 	}
 
@@ -664,7 +708,7 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 		})
 		tr.LazyPrintf("Repos.List - done")
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, nil, false, err
 		}
 	}
 	overLimit = len(repos) >= maxRepoListSize
@@ -748,7 +792,8 @@ func resolveRepositories(ctx context.Context, op resolveRepoOp) (repoRevisions, 
 		repoRevisions, err = filterRepoHasCommitAfter(ctx, repoRevisions, op.commitAfter)
 	}
 
-	return repoRevisions, missingRepoRevisions, overLimit, err
+	// FIXME remove excludedRepoRevisions if we don't do the filter thing.
+	return repoRevisions, missingRepoRevisions, excludedRepoRevisions, overLimit, err
 }
 
 type indexedReposFunc func(ctx context.Context, revs []*search.RepositoryRevisions) (indexed, unindexed []*search.RepositoryRevisions, err error)
@@ -860,7 +905,7 @@ func optimizeRepoPatternWithHeuristics(repoPattern string) string {
 }
 
 func (r *searchResolver) suggestFilePaths(ctx context.Context, limit int) ([]*searchSuggestionResolver, error) {
-	repos, _, overLimit, err := r.resolveRepositories(ctx, nil)
+	repos, _, _, overLimit, err := r.resolveRepositories(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

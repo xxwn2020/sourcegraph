@@ -43,7 +43,7 @@ func (s *Server) handler() http.Handler {
 
 // GET /uploads/{id:[0-9]+}
 func (s *Server) handleGetUpload(w http.ResponseWriter, r *http.Request) {
-	file, err := os.Open(paths.UploadFilename(s.BundleDir, idFromRequest(r)))
+	file, err := os.Open(paths.UploadFilename(s.bundleDir, idFromRequest(r)))
 	if err != nil {
 		http.Error(w, "Upload not found.", http.StatusNotFound)
 		return
@@ -148,8 +148,8 @@ func (s *Server) handleMonikerResults(w http.ResponseWriter, r *http.Request) {
 			return nil, errors.New("illegal skip supplied")
 		}
 
-		take := getQueryInt(r, "take")
-		if take < 0 {
+		take := getQueryIntDefault(r, "take", DefaultMonikerResultPageSize)
+		if take <= 0 {
 			return nil, errors.New("illegal take supplied")
 		}
 
@@ -193,7 +193,7 @@ func (s *Server) handlePackageInformation(w http.ResponseWriter, r *http.Request
 func (s *Server) doUpload(w http.ResponseWriter, r *http.Request, makeFilename func(bundleDir string, id int64) string) bool {
 	defer r.Body.Close()
 
-	targetFile, err := os.OpenFile(makeFilename(s.BundleDir, idFromRequest(r)), os.O_WRONLY|os.O_CREATE, 0666)
+	targetFile, err := os.OpenFile(makeFilename(s.bundleDir, idFromRequest(r)), os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		log15.Error("Failed to open target file", "err", err)
 		http.Error(w, fmt.Sprintf("failed to open target file: %s", err.Error()), http.StatusInternalServerError)
@@ -210,18 +210,26 @@ func (s *Server) doUpload(w http.ResponseWriter, r *http.Request, makeFilename f
 }
 
 func (s *Server) deleteUpload(w http.ResponseWriter, r *http.Request) {
-	if err := os.Remove(paths.UploadFilename(s.BundleDir, idFromRequest(r))); err != nil {
+	if err := os.Remove(paths.UploadFilename(s.bundleDir, idFromRequest(r))); err != nil {
 		log15.Warn("Failed to delete upload file", "err", err)
 	}
 }
 
 type dbQueryHandlerFn func(ctx context.Context, db database.Database) (interface{}, error)
 
+// ErrUnknownDatabase occurs when a request for an unknown database is made.
+var ErrUnknownDatabase = errors.New("unknown database")
+
 // dbQuery invokes the given handler with the database instance chosen from the
 // route's id value and serializes the resulting value to the response writer. If an
 // error occurs it will be written to the body of a 500-level response.
 func (s *Server) dbQuery(w http.ResponseWriter, r *http.Request, handler dbQueryHandlerFn) {
 	if err := s.dbQueryErr(w, r, handler); err != nil {
+		if err == ErrUnknownDatabase {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
 		http.Error(w, fmt.Sprintf("failed to handle query: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
@@ -232,7 +240,7 @@ func (s *Server) dbQuery(w http.ResponseWriter, r *http.Request, handler dbQuery
 // error occurs it will be returned.
 func (s *Server) dbQueryErr(w http.ResponseWriter, r *http.Request, handler dbQueryHandlerFn) (err error) {
 	ctx := r.Context()
-	filename := paths.DBFilename(s.BundleDir, idFromRequest(r))
+	filename := paths.DBFilename(s.bundleDir, idFromRequest(r))
 	cached := true
 
 	span, ctx := ot.StartSpanFromContext(ctx, "dbQuery")
@@ -249,18 +257,39 @@ func (s *Server) dbQueryErr(w http.ResponseWriter, r *http.Request, handler dbQu
 	openDatabase := func() (database.Database, error) {
 		cached = false
 
-		// TODO - What is the behavior if the db is missing? Should we stat first or clean up after?
+		// Ensure database exists prior to opening
+		if _, err := os.Stat(filename); err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrUnknownDatabase
+			}
+
+			return nil, err
+		}
+
 		sqliteReader, err := reader.NewSQLiteReader(filename, serializer.NewDefaultSerializer())
 		if err != nil {
 			return nil, pkgerrors.Wrap(err, "reader.NewSQLiteReader")
 		}
 
-		database, err := database.OpenDatabase(ctx, filename, s.wrapReader(sqliteReader), s.DocumentDataCache, s.ResultChunkDataCache)
+		// Check to see if the database exists after opening it. If it doesn't, then
+		// the DB file was deleted between the exists check and opening the database
+		// and SQLite has created a new, empty database that is not yet written to disk.
+		if _, err := os.Stat(filename); err != nil {
+			if os.IsNotExist(err) {
+				sqliteReader.Close()
+				os.Remove(filename) // Possibly created on close
+				return nil, ErrUnknownDatabase
+			}
+
+			return nil, err
+		}
+
+		database, err := database.OpenDatabase(ctx, filename, s.wrapReader(sqliteReader), s.documentCache, s.resultChunkCache)
 		if err != nil {
 			return nil, pkgerrors.Wrap(err, "database.OpenDatabase")
 		}
 
-		return s.wrapDatabase(database), nil
+		return s.wrapDatabase(database, filename), nil
 	}
 
 	cacheHandler := func(db database.Database) error {
@@ -273,13 +302,13 @@ func (s *Server) dbQueryErr(w http.ResponseWriter, r *http.Request, handler dbQu
 		return nil
 	}
 
-	return s.DatabaseCache.WithDatabase(filename, openDatabase, cacheHandler)
+	return s.databaseCache.WithDatabase(filename, openDatabase, cacheHandler)
 }
 
 func (s *Server) wrapReader(innerReader reader.Reader) reader.Reader {
-	return reader.NewObserved(innerReader, s.ObservationContext)
+	return reader.NewObserved(innerReader, s.observationContext)
 }
 
-func (s *Server) wrapDatabase(innerDatabase database.Database) database.Database {
-	return database.NewObserved(innerDatabase, s.ObservationContext)
+func (s *Server) wrapDatabase(innerDatabase database.Database, filename string) database.Database {
+	return database.NewObserved(innerDatabase, filename, s.observationContext)
 }
