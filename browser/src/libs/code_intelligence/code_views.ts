@@ -94,10 +94,7 @@ export const trackCodeViews = ({
     trackViews<CodeView>(codeViewResolvers)
 
 export interface FileInfoWithContents extends FileInfoWithRepoNames {
-    content?: string
-    baseContent?: string
-    headHasFileContents?: boolean
-    baseHasFileContents?: boolean
+    content?: string // @TODO: should this property be optional?
 }
 
 export const fetchFileContents = (

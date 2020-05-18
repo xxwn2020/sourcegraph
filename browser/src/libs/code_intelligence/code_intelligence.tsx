@@ -259,6 +259,8 @@ export interface CodeHost extends ApplyLinkPreviewOptions {
     codeViewsRequireTokenization?: boolean
 }
 
+export type DiffPartsFileInfo = { head: FileInfo } | { base: FileInfo } | { head: FileInfo; base: FileInfo }
+
 export interface FileInfo {
     /**
      * The path for the repo the file belongs to. If a `baseRepoName` is provided, this value
@@ -279,28 +281,9 @@ export interface FileInfo {
      * The revision the code view is at. If a `baseRev` is provided, this value is treated as the head rev.
      */
     rev?: string
-    /**
-     * The repo name for the BASE side of a diff. This is useful for Phabricator
-     * staging areas since they are separate repos.
-     */
-    baseRawRepoName?: string
-    /**
-     * The base file path.
-     */
-    baseFilePath?: string
-    /**
-     * Commit ID for the BASE side of the diff.
-     */
-    baseCommitID?: string
-    /**
-     * Revision for the BASE side of the diff.
-     */
-    baseRev?: string
 }
 
-export interface FileInfoWithRepoNames extends FileInfo, RepoSpec {
-    baseRepoName?: string
-}
+export interface FileInfoWithRepoNames extends FileInfo, RepoSpec {}
 
 export interface CodeIntelligenceProps extends TelemetryProps {
     platformContext: Pick<
