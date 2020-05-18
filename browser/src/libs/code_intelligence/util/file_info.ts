@@ -4,49 +4,69 @@ import { catchError, map } from 'rxjs/operators'
 import { isPrivateRepoPublicSourcegraphComErrorLike } from '../../../../../shared/src/backend/errors'
 import { PlatformContext } from '../../../../../shared/src/platform/context'
 import { resolveRepo, resolveRev, retryWhenCloneInProgressError } from '../../../shared/repo/backend'
-import { FileInfo, FileInfoWithRepoNames } from '../code_intelligence'
+import { DiffFileInfo, FileInfo, FileInfoWithRepoNames } from '../code_intelligence'
 
-export const ensureRevisionsAreCloned = (
-    { repoName, commitID, baseCommitID, ...rest }: FileInfoWithRepoNames,
+export const ensureRevisionsAreCloned = <T extends FileInfo>(
+    diffFileInfo: DiffFileInfo<T & { repoName: string }>,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileInfoWithRepoNames> => {
+): Observable<DiffFileInfo<T & { repoName: string }>> => {
     // Although we get the commit SHA's from elsewhere, we still need to
     // use `resolveRev` otherwise we can't guarantee Sourcegraph has the
     // revision cloned.
+    const requests = []
 
     // Head
-    const resolvingHeadRev = resolveRev({ repoName, rev: commitID, requestGraphQL }).pipe(
-        retryWhenCloneInProgressError()
-    )
-
-    const requests = [resolvingHeadRev]
+    if (diffFileInfo.head) {
+        const resolvingHeadRev = resolveRev({
+            repoName: diffFileInfo.head.repoName,
+            rev: diffFileInfo.head.commitID,
+            requestGraphQL,
+        }).pipe(retryWhenCloneInProgressError())
+        requests.push(resolvingHeadRev)
+    }
 
     // If theres a base, resolve it as well.
-    if (baseCommitID) {
-        const resolvingBaseRev = resolveRev({ repoName, rev: baseCommitID, requestGraphQL }).pipe(
-            retryWhenCloneInProgressError()
-        )
+    if (diffFileInfo.base) {
+        const resolvingBaseRev = resolveRev({
+            repoName: diffFileInfo.base.repoName,
+            rev: diffFileInfo.base.commitID,
+            requestGraphQL,
+        }).pipe(retryWhenCloneInProgressError())
         requests.push(resolvingBaseRev)
     }
 
-    return zip(...requests).pipe(map(() => ({ repoName, commitID, baseCommitID, ...rest })))
+    // TODO: not sure about this, can it be rewritten?
+    // The intent is to return just a copy of the original diffFileInfo
+    return zip(...requests).pipe(map(() => ({ ...diffFileInfo })))
 }
 
 /**
  * Resolve a `FileInfo`'s raw repo names to their Sourcegraph
  * repo names as affected by `repositoryPathPattern`.
  */
-export const resolveRepoNames = (
-    { rawRepoName, baseRawRepoName, ...rest }: FileInfo,
+export const resolveRepoNames = <T extends FileInfo>(
+    diffFileInfo: DiffFileInfo<T>,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileInfoWithRepoNames> => {
-    const resolvingHeadRepoName = resolveRepo({ rawRepoName, requestGraphQL }).pipe(retryWhenCloneInProgressError())
-    const resolvingBaseRepoName = baseRawRepoName
-        ? resolveRepo({ rawRepoName: baseRawRepoName, requestGraphQL }).pipe(retryWhenCloneInProgressError())
+): Observable<DiffFileInfo<T & { repoName: string }>> => {
+    const resolvingHeadRepoName = diffFileInfo.head
+        ? resolveRepo({ rawRepoName: diffFileInfo.head.rawRepoName, requestGraphQL }).pipe(
+              retryWhenCloneInProgressError()
+          )
+        : of(undefined)
+    const resolvingBaseRepoName = diffFileInfo.base
+        ? resolveRepo({ rawRepoName: diffFileInfo.base.rawRepoName, requestGraphQL }).pipe(
+              retryWhenCloneInProgressError()
+          )
         : of(undefined)
 
     return zip(resolvingHeadRepoName, resolvingBaseRepoName).pipe(
-        map(([repoName, baseRepoName]) => ({ repoName, baseRepoName, rawRepoName, baseRawRepoName, ...rest })),
+        map(([headRepoName, baseRepoName]) => {
+            return {
+                ...diffFileInfo,
+                head: diffFileInfo.head && { ...diffFileInfo.head, repoName: headRepoName || '' },
+                base: diffFileInfo.base && { ...diffFileInfo.base, repoName: baseRepoName || '' },
+            }
+        }),
 
         // ERPRIVATEREPOPUBLICSOURCEGRAPHCOM likely means that the user is viewing private code
         // without having pointed his browser extension to a self-hosted Sourcegraph instance that
@@ -54,7 +74,12 @@ export const resolveRepoNames = (
         // so we keep the repo names inferred from the code host's DOM.
         catchError(err => {
             if (isPrivateRepoPublicSourcegraphComErrorLike(err)) {
-                return [{ rawRepoName, baseRawRepoName, repoName: rawRepoName, baseRepoName: baseRawRepoName, ...rest }]
+                return [
+                    {
+                        head: diffFileInfo.head && { ...diffFileInfo.head, repoName: diffFileInfo.head.rawRepoName },
+                        base: diffFileInfo.base && { ...diffFileInfo.base, repoName: diffFileInfo.base.rawRepoName },
+                    },
+                ]
             }
             throw err
         })

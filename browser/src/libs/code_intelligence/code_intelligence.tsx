@@ -259,7 +259,8 @@ export interface CodeHost extends ApplyLinkPreviewOptions {
     codeViewsRequireTokenization?: boolean
 }
 
-export type DiffPartsFileInfo = { head: FileInfo } | { base: FileInfo } | { head: FileInfo; base: FileInfo }
+export type DiffFileInfo<T extends FileInfo = FileInfo> = { base?: T; head?: T }
+export type DiffFileInfoWithContents = DiffFileInfo<FileInfo & { contents: string }>
 
 export interface FileInfo {
     /**
