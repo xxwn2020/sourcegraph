@@ -92,7 +92,7 @@ import { bitbucketServerCodeHost } from '../bitbucket/code_intelligence'
 import { githubCodeHost } from '../github/code_intelligence'
 import { gitlabCodeHost } from '../gitlab/code_intelligence'
 import { phabricatorCodeHost } from '../phabricator/code_intelligence'
-import { CodeView, fetchFileContents, trackCodeViews } from './code_views'
+import { CodeView, fetchFileContentForFileDiff, trackCodeViews } from './code_views'
 import { ContentView, handleContentViews } from './content_views'
 import { applyDecorations, initializeExtensions, renderCommandPalette, renderGlobalDebug } from './extensions'
 import { ViewOnSourcegraphButtonClassProps, ViewOnSourcegraphButton } from './external_links'
@@ -259,8 +259,28 @@ export interface CodeHost extends ApplyLinkPreviewOptions {
     codeViewsRequireTokenization?: boolean
 }
 
-export type DiffFileInfo<T extends FileInfo = FileInfo> = { base?: T; head?: T }
-export type DiffFileInfoWithContents = DiffFileInfo<FileInfo & { contents: string }>
+export interface BaseFileDiff {
+    diffType: string
+}
+export type FileDiff<T extends FileInfo = FileInfo> = AddedFileDiff<T> | ModifiedFileDiff<T> | RemovedFileDiff<T>
+export interface AddedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithHead<T> {
+    diffType: 'added'
+}
+export interface ModifiedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithHead<T>, FileDiffWithBase<T> {
+    diffType: 'modified'
+}
+export interface RemovedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithBase<T> {
+    diffType: 'removed'
+}
+export type FileDiffWithContent = FileDiff<FileInfoWithContent>
+export type FileDiffWithRepoNames = FileDiff<FileInfoWithRepoNames>
+
+export interface FileDiffWithHead<T extends FileInfo = FileInfo> extends BaseFileDiff {
+    head: T
+}
+export interface FileDiffWithBase<T extends FileInfo = FileInfo> extends BaseFileDiff {
+    base: T
+}
 
 export interface FileInfo {
     /**
@@ -285,6 +305,9 @@ export interface FileInfo {
 }
 
 export interface FileInfoWithRepoNames extends FileInfo, RepoSpec {}
+export interface FileInfoWithContent extends FileInfo {
+    content?: string
+}
 
 export interface CodeIntelligenceProps extends TelemetryProps {
     platformContext: Pick<

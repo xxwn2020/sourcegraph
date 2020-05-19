@@ -1,87 +1,121 @@
 import { Observable, of, zip } from 'rxjs'
-import { catchError, map } from 'rxjs/operators'
+import { catchError, map, mapTo } from 'rxjs/operators'
 
 import { isPrivateRepoPublicSourcegraphComErrorLike } from '../../../../../shared/src/backend/errors'
 import { PlatformContext } from '../../../../../shared/src/platform/context'
 import { resolveRepo, resolveRev, retryWhenCloneInProgressError } from '../../../shared/repo/backend'
-import { DiffFileInfo, FileInfo, FileInfoWithRepoNames } from '../code_intelligence'
+import {
+    FileInfo,
+    FileDiffWithRepoNames,
+    FileDiff,
+    FileInfoWithRepoNames,
+    FileDiffWithHead,
+    BaseFileDiff,
+    FileDiffWithBase,
+} from '../code_intelligence'
 
-export const ensureRevisionsAreCloned = <T extends FileInfo>(
-    diffFileInfo: DiffFileInfo<T & { repoName: string }>,
+export const ensureRevisionsAreCloned = (
+    fileDiff: FileDiffWithRepoNames,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<DiffFileInfo<T & { repoName: string }>> => {
+): Observable<FileDiff<FileInfoWithRepoNames>> => {
     // Although we get the commit SHA's from elsewhere, we still need to
     // use `resolveRev` otherwise we can't guarantee Sourcegraph has the
     // revision cloned.
-    const requests = []
+    const requests: Observable<string>[] = []
 
-    // Head
-    if (diffFileInfo.head) {
+    if (diffHasHead(fileDiff)) {
+        const { repoName, commitID } = fileDiff.head
         const resolvingHeadRev = resolveRev({
-            repoName: diffFileInfo.head.repoName,
-            rev: diffFileInfo.head.commitID,
+            repoName,
+            rev: commitID,
             requestGraphQL,
         }).pipe(retryWhenCloneInProgressError())
         requests.push(resolvingHeadRev)
     }
 
-    // If theres a base, resolve it as well.
-    if (diffFileInfo.base) {
+    if (diffHasBase(fileDiff)) {
+        const { repoName, commitID } = fileDiff.base
         const resolvingBaseRev = resolveRev({
-            repoName: diffFileInfo.base.repoName,
-            rev: diffFileInfo.base.commitID,
+            repoName,
+            rev: commitID,
             requestGraphQL,
         }).pipe(retryWhenCloneInProgressError())
         requests.push(resolvingBaseRev)
     }
 
-    // TODO: not sure about this, can it be rewritten?
-    // The intent is to return just a copy of the original diffFileInfo
-    return zip(...requests).pipe(map(() => ({ ...diffFileInfo })))
+    return zip(...requests).pipe(mapTo(fileDiff))
 }
 
 /**
  * Resolve a `FileInfo`'s raw repo names to their Sourcegraph
  * repo names as affected by `repositoryPathPattern`.
  */
-export const resolveRepoNames = <T extends FileInfo>(
-    diffFileInfo: DiffFileInfo<T>,
+export const resolveRepoNames = (
+    fileDiff: FileDiff,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<DiffFileInfo<T & { repoName: string }>> => {
-    const resolvingHeadRepoName = diffFileInfo.head
-        ? resolveRepo({ rawRepoName: diffFileInfo.head.rawRepoName, requestGraphQL }).pipe(
-              retryWhenCloneInProgressError()
-          )
-        : of(undefined)
-    const resolvingBaseRepoName = diffFileInfo.base
-        ? resolveRepo({ rawRepoName: diffFileInfo.base.rawRepoName, requestGraphQL }).pipe(
-              retryWhenCloneInProgressError()
-          )
-        : of(undefined)
+): Observable<FileDiffWithRepoNames> => {
+    if (diffHasBase(fileDiff) && diffHasHead(fileDiff)) {
+        const resolvingHeadWithRepoName = resolveFileInfoWithRepoName(fileDiff.head, requestGraphQL)
+        const resolvingBaseWithRepoName = resolveFileInfoWithRepoName(fileDiff.base, requestGraphQL)
 
-    return zip(resolvingHeadRepoName, resolvingBaseRepoName).pipe(
-        map(([headRepoName, baseRepoName]) => {
-            return {
-                ...diffFileInfo,
-                head: diffFileInfo.head && { ...diffFileInfo.head, repoName: headRepoName || '' },
-                base: diffFileInfo.base && { ...diffFileInfo.base, repoName: baseRepoName || '' },
-            }
-        }),
+        return zip(resolvingHeadWithRepoName, resolvingBaseWithRepoName).pipe(
+            map(([head, base]) => ({
+                ...fileDiff,
+                head,
+                base,
+            }))
+        )
+    } else if (diffHasHead(fileDiff)) {
+        return resolveFileInfoWithRepoName(fileDiff.head, requestGraphQL).pipe(
+            map(head => ({
+                ...fileDiff,
+                head,
+            }))
+        )
+    }
+    // Remaining case: diff has only a base.
+    return resolveFileInfoWithRepoName(fileDiff.base, requestGraphQL).pipe(
+        map(base => ({
+            ...fileDiff,
+            base,
+        }))
+    )
+}
 
-        // ERPRIVATEREPOPUBLICSOURCEGRAPHCOM likely means that the user is viewing private code
-        // without having pointed his browser extension to a self-hosted Sourcegraph instance that
-        // has access to that code. In that case, it's impossible to resolve the repo names,
-        // so we keep the repo names inferred from the code host's DOM.
+/**
+ * Use `rawRepoName` for the value of `repoName`, as a fallback if `repoName` was not available.
+ * */
+function useRawRepoNameAsFallback(fileInfo: FileInfo): FileInfoWithRepoNames {
+    return {
+        ...fileInfo,
+        repoName: fileInfo.rawRepoName,
+    }
+}
+
+function resolveFileInfoWithRepoName(
+    fileInfo: FileInfo,
+    requestGraphQL: PlatformContext['requestGraphQL']
+): Observable<FileInfoWithRepoNames> {
+    return resolveRepo({ rawRepoName: fileInfo.rawRepoName, requestGraphQL }).pipe(
+        retryWhenCloneInProgressError(),
+        map(repoName => ({ ...fileInfo, repoName })),
         catchError(err => {
+            // ERPRIVATEREPOPUBLICSOURCEGRAPHCOM likely means that the user is viewing private code
+            // without having pointed his browser extension to a self-hosted Sourcegraph instance that
+            // has access to that code. In that case, it's impossible to resolve the repo names,
+            // so we keep the repo names inferred from the code host's DOM.
             if (isPrivateRepoPublicSourcegraphComErrorLike(err)) {
-                return [
-                    {
-                        head: diffFileInfo.head && { ...diffFileInfo.head, repoName: diffFileInfo.head.rawRepoName },
-                        base: diffFileInfo.base && { ...diffFileInfo.base, repoName: diffFileInfo.base.rawRepoName },
-                    },
-                ]
+                return of(useRawRepoNameAsFallback(fileInfo))
             }
             throw err
         })
     )
+}
+
+export function diffHasHead(input: BaseFileDiff): input is FileDiffWithHead {
+    return 'head' in input
+}
+
+export function diffHasBase(input: BaseFileDiff): input is FileDiffWithBase {
+    return 'base' in input
 }
