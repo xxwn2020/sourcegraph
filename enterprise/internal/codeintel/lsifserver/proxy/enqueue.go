@@ -1,4 +1,4 @@
-package server
+package proxy
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/inconshreveable/log15"
+	bundles "github.com/sourcegraph/sourcegraph/internal/codeintel/bundles/client"
 	"github.com/sourcegraph/sourcegraph/internal/codeintel/db"
 )
 
@@ -26,6 +27,11 @@ func clientError(message string, vals ...interface{}) error {
 
 type enqueuePayload struct {
 	ID string `json:"id"`
+}
+
+type Server struct {
+	db                  db.DB
+	bundleManagerClient bundles.BundleManagerClient
 }
 
 // POST /upload

@@ -7,12 +7,13 @@ import (
 
 	"github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
+	codeintelapi "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/api"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/codeintel/lsifserver/client"
 	"github.com/sourcegraph/sourcegraph/internal/lsif"
 )
 
 type lsifQueryResolver struct {
+	codeIntelAPI       codeintelapi.CodeIntelAPI // TODO - populate
 	repositoryResolver *graphqlbackend.RepositoryResolver
 	// commit is the requested target commit
 	commit api.CommitID
@@ -34,23 +35,13 @@ func (r *lsifQueryResolver) Definitions(ctx context.Context, args *graphqlbacken
 			continue
 		}
 
-		opts := &struct {
-			RepoID    api.RepoID
-			Commit    api.CommitID
-			Path      string
-			Line      int32
-			Character int32
-			UploadID  int64
-		}{
-			RepoID:    r.repositoryResolver.Type().ID,
-			Commit:    r.commit,
-			Path:      r.path,
-			Line:      int32(adjustedPosition.Line),
-			Character: int32(adjustedPosition.Character),
-			UploadID:  upload.ID,
-		}
-
-		locations, _, err := client.DefaultClient.Definitions(ctx, opts)
+		locations, err := r.codeIntelAPI.Definitions(
+			ctx,
+			r.path,
+			adjustedPosition.Line,
+			adjustedPosition.Character,
+			int(upload.ID),
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +50,7 @@ func (r *lsifQueryResolver) Definitions(ctx context.Context, args *graphqlbacken
 			return &locationConnectionResolver{
 				repo:      r.repositoryResolver.Type(),
 				commit:    r.commit,
-				locations: locations,
+				locations: serializeLocations(locations),
 			}, nil
 		}
 	}
@@ -121,7 +112,35 @@ func (r *lsifQueryResolver) References(ctx context.Context, args *graphqlbackend
 			continue
 		}
 
-		locations, nextURL, err := client.DefaultClient.References(ctx, opts)
+		cursor, err := codeintelapi.DecodeOrCreateCursor(
+			r.path,
+			adjustedPosition.Line,
+			adjustedPosition.Character,
+			upload.ID,
+			opts.Cursor,
+			r.db,
+			r.bundleManagerClient,
+		)
+		if err != nil {
+			if err == api.ErrMissingDump {
+				// TODO
+			}
+
+			return nil, err
+		}
+
+		limit := args.First
+		if args.First == 0 {
+			limit = 200 // TODO - default
+		}
+
+		locations, newCursor, hasNewCursor, err := r.codeIntelAPI.References(
+			ctx,
+			r.repositoryResolver.Type().ID,
+			r.commit,
+			limit,
+			cursor,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -155,23 +174,22 @@ func (r *lsifQueryResolver) Hover(ctx context.Context, args *graphqlbackend.LSIF
 			continue
 		}
 
-		text, lspRange, err := client.DefaultClient.Hover(ctx, &struct {
-			RepoID    api.RepoID
-			Commit    api.CommitID
-			Path      string
-			Line      int32
-			Character int32
-			UploadID  int64
-		}{
-			RepoID:    r.repositoryResolver.Type().ID,
-			Commit:    r.commit,
-			Path:      r.path,
-			Line:      int32(adjustedPosition.Line),
-			Character: int32(adjustedPosition.Character),
-			UploadID:  upload.ID,
-		})
+		text, lspRange, exists, err := r.codeIntelAPI.Hover(
+			ctx,
+			r.Path,
+			int32(adjustedPosition.Line),
+			int32(adjustedPosition.Character),
+			upload.DI,
+		)
 		if err != nil {
+			if err == api.ErrMissingDump {
+				// TODO
+			}
+
 			return nil, err
+		}
+		if !exists {
+			// TODO
 		}
 
 		if text != "" {

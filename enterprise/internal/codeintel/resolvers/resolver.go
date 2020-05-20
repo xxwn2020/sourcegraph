@@ -5,10 +5,10 @@ import (
 	"encoding/base64"
 
 	graphql "github.com/graph-gophers/graphql-go"
+	"github.com/pkg/errors"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
-	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/codeintel/lsifserver/client"
+	"github.com/sourcegraph/sourcegraph/internal/codeintel/gitserver"
 )
 
 type Resolver struct{}
@@ -25,13 +25,12 @@ func (r *Resolver) LSIFUploadByID(ctx context.Context, id graphql.ID) (graphqlba
 		return nil, err
 	}
 
-	lsifUpload, err := client.DefaultClient.GetUpload(ctx, &struct {
-		UploadID int64
-	}{
-		UploadID: uploadID,
-	})
+	upload, exists, err := r.db.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return nil, err
+	}
+	if !exists {
+		// TODO
 	}
 
 	return &lsifUploadResolver{lsifUpload: lsifUpload}, nil
@@ -48,13 +47,18 @@ func (r *Resolver) DeleteLSIFUpload(ctx context.Context, id graphql.ID) (*graphq
 		return nil, err
 	}
 
-	err = client.DefaultClient.DeleteUpload(ctx, &struct {
-		UploadID int64
-	}{
-		UploadID: uploadID,
+	exists, err := r.db.DeleteUploadByID(ctx, uploadID, func(repositoryID int) (string, error) {
+		tipCommit, err := gitserver.Head(ctx, s.db, repositoryID)
+		if err != nil {
+			return "", errors.Wrap(err, "gitserver.Head")
+		}
+		return tipCommit, nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !exists {
+		// TODO
 	}
 
 	return &graphqlbackend.EmptyResponse{}, nil
@@ -91,16 +95,12 @@ func (r *Resolver) LSIFUploads(ctx context.Context, args *graphqlbackend.LSIFRep
 }
 
 func (r *Resolver) LSIF(ctx context.Context, args *graphqlbackend.LSIFQueryArgs) (graphqlbackend.LSIFQueryResolver, error) {
-	uploads, err := client.DefaultClient.Exists(ctx, &struct {
-		RepoID api.RepoID
-		Commit api.CommitID
-		Path   string
-	}{
-		RepoID: args.Repository.Type().ID,
-		Commit: args.Commit,
-		Path:   args.Path,
-	})
-
+	uploads, err := s.codeIntelAPI.FindClosestDumps(
+		r.Context(),
+		args.Repository.Type().ID,
+		args.Commit,
+		args.Path,
+	)
 	if err != nil {
 		return nil, err
 	}

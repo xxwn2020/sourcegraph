@@ -11,8 +11,6 @@ import (
 	"github.com/graph-gophers/graphql-go/relay"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend/graphqlutil"
-	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/codeintel/lsifserver/client"
 	"github.com/sourcegraph/sourcegraph/internal/lsif"
 )
 
@@ -166,21 +164,21 @@ func (r *lsifUploadConnectionResolver) compute(ctx context.Context) ([]*lsif.LSI
 			return
 		}
 
-		r.uploads, r.nextURL, r.totalCount, r.err = client.DefaultClient.GetUploads(ctx, &struct {
-			RepoID          api.RepoID
-			Query           *string
-			State           *string
-			IsLatestForRepo *bool
-			Limit           *int32
-			Cursor          *string
-		}{
-			RepoID:          r.repositoryResolver.Type().ID,
-			Query:           r.opt.Query,
-			State:           r.opt.State,
-			IsLatestForRepo: r.opt.IsLatestForRepo,
-			Limit:           r.opt.Limit,
-			Cursor:          r.opt.NextURL,
-		})
+		r.uploads, r.totalCount, r.err = r.db.GetUploadsByRepo(
+			ctx,
+			r.repositoryResolver.Type().ID,
+			r.opt.State,
+			r.opt.Query,
+			r.opt.IsLatestForRepo,
+			r.opt.Limit,
+			offset, // TODO
+		)
+
+		// TODO
+		// r.nextURL = makeNextLink(r.URL, map[string]interface{}{
+		// 	"limit":  limit,
+		// 	"offset": offset + len(uploads),
+		// })
 	})
 
 	return r.uploads, r.repositoryResolver, r.totalCount, r.nextURL, r.err
