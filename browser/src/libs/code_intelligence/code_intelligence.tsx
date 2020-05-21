@@ -111,7 +111,7 @@ import { delayUntilIntersecting, ViewResolver } from './views'
 import { IS_LIGHT_THEME } from './consts'
 import { NotificationType } from 'sourcegraph'
 import { failedWithHTTPStatus } from '../../../../shared/src/backend/fetch'
-import { asError } from '../../../../shared/src/util/errors'
+import { asError, ErrorLike } from '../../../../shared/src/util/errors'
 
 registerHighlightContributions()
 
@@ -260,28 +260,28 @@ export interface CodeHost extends ApplyLinkPreviewOptions {
     codeViewsRequireTokenization?: boolean
 }
 
-export type DiffOrFileInfo<T extends FileInfo = FileInfo> =
-    | {
-          type: 'diff'
-          fileDiff: FileDiff<T>
-      }
-    | {
-          type: 'file'
-          fileInfo: T
-      }
+/**
+ * A blob (single file `FileInfo`) or a diff (with a head `FileInfo` and/or base `FileInfo`)
+ */
+export type DiffOrBlobInfo<T extends FileInfo = FileInfo> = ({ type: 'blob' } & T) | FileDiff<T>
+
+export type DiffOrBlobInfoOrError<T extends FileInfo = FileInfo> =
+    | DiffOrBlobInfo<T>
+    | { type: 'error'; error: ErrorLike }
 
 export type FileDiff<T extends FileInfo = FileInfo> = AddedFileDiff<T> | ModifiedFileDiff<T> | RemovedFileDiff<T>
+
 export interface AddedFileDiff<T extends FileInfo = FileInfo> {
-    diffType: 'added'
+    type: 'added'
     head: T
 }
 export interface ModifiedFileDiff<T extends FileInfo = FileInfo> {
-    diffType: 'modified'
+    type: 'modified'
     head: T
     base: T
 }
 export interface RemovedFileDiff<T extends FileInfo = FileInfo> {
-    diffType: 'removed'
+    type: 'removed'
     base: T
 }
 
@@ -733,13 +733,13 @@ export function handleCodeHost({
             asObservable(() =>
                 codeViewEvent.resolveFileInfo(codeViewEvent.element, platformContext.requestGraphQL)
             ).pipe(
-                mergeMap(diffOrFileInfo =>
-                    resolveRepoNamesForDiffOrFileInfo(diffOrFileInfo, platformContext.requestGraphQL)
+                mergeMap(diffOrBlobInfo =>
+                    resolveRepoNamesForDiffOrFileInfo(diffOrBlobInfo, platformContext.requestGraphQL)
                 ),
-                mergeMap(diffOrFileInfo =>
-                    fetchFileContentForDiffOrFileInfo(diffOrFileInfo, platformContext.requestGraphQL).pipe(
-                        map(diffOrFileInfo => ({
-                            diffOrFileInfo,
+                mergeMap(diffOrBlobInfo =>
+                    fetchFileContentForDiffOrFileInfo(diffOrBlobInfo, platformContext.requestGraphQL).pipe(
+                        map(diffOrBlobInfo => ({
+                            diffOrBlobInfo,
                             ...codeViewEvent,
                         }))
                     )
@@ -839,7 +839,7 @@ export function handleCodeHost({
             console.log('Code view added')
             codeViewEvent.subscriptions.add(() => console.log('Code view removed'))
 
-            const { element, diffOrFileInfo, getPositionAdjuster, getToolbarMount, toolbarButtonProps } = codeViewEvent
+            const { element, diffOrBlobInfo, getPositionAdjuster, getToolbarMount, toolbarButtonProps } = codeViewEvent
 
             const initializeModelAndViewerForFileInfo = (
                 fileInfo: FileInfoWithContent & FileInfoWithRepoNames,
@@ -888,24 +888,21 @@ export function handleCodeHost({
             }
 
             const initializeModelAndViewerForDiffOrFileInfo = (
-                diffOrFileInfo: DiffOrFileInfo<FileInfoWithContent>
+                diffOrFileInfo: DiffOrBlobInfo<FileInfoWithContent>
             ): CodeEditorWithPartialModel => {
-                if (diffOrFileInfo.type === 'file') {
-                    return initializeModelAndViewerForFileInfo(diffOrFileInfo.fileInfo, true)
-                } else {
-                    const fileDiff = diffOrFileInfo.fileDiff
-                    if (diffHasHead(fileDiff) && diffHasBase(fileDiff)) {
-                        const editor = initializeModelAndViewerForFileInfo(fileDiff.head, true)
-                        initializeModelAndViewerForFileInfo(fileDiff.base)
-                        return editor
-                    } else if (diffHasBase(fileDiff)) {
-                        return initializeModelAndViewerForFileInfo(fileDiff.base, true)
-                    }
-                    return initializeModelAndViewerForFileInfo(fileDiff.head, true)
+                if (diffOrFileInfo.type === 'blob') {
+                    return initializeModelAndViewerForFileInfo(diffOrFileInfo, true)
+                } else if (diffHasHead(diffOrFileInfo) && diffHasBase(diffOrFileInfo)) {
+                    const editor = initializeModelAndViewerForFileInfo(diffOrFileInfo.head, true)
+                    initializeModelAndViewerForFileInfo(diffOrFileInfo.base)
+                    return editor
+                } else if (diffHasBase(diffOrFileInfo)) {
+                    return initializeModelAndViewerForFileInfo(diffOrFileInfo.base, true)
                 }
+                return initializeModelAndViewerForFileInfo(diffOrFileInfo.head, true)
             }
 
-            const codeEditorWithPartialModel = initializeModelAndViewerForDiffOrFileInfo(diffOrFileInfo)
+            const codeEditorWithPartialModel = initializeModelAndViewerForDiffOrFileInfo(diffOrBlobInfo)
 
             const domFunctions = {
                 ...codeViewEvent.dom,
@@ -949,35 +946,29 @@ export function handleCodeHost({
 
             // Apply decorations coming from extensions
             if (!minimalUI) {
-                if (diffOrFileInfo.type === 'file') {
-                    applyDecorationsForFileInfo(diffOrFileInfo.fileInfo)
-                } else {
-                    if (diffHasHead(diffOrFileInfo.fileDiff)) {
-                        applyDecorationsForFileInfo(diffOrFileInfo.fileDiff.head, 'head')
-                    }
-                    if (diffHasBase(diffOrFileInfo.fileDiff)) {
-                        applyDecorationsForFileInfo(diffOrFileInfo.fileDiff.base, 'base')
-                    }
+                if (diffOrBlobInfo.type === 'blob') {
+                    applyDecorationsForFileInfo(diffOrBlobInfo)
+                } else if (diffHasHead(diffOrBlobInfo)) {
+                    applyDecorationsForFileInfo(diffOrBlobInfo.head, 'head')
+                } else if (diffHasBase(diffOrBlobInfo)) {
+                    applyDecorationsForFileInfo(diffOrBlobInfo.base, 'base')
                 }
             }
 
             // Add hover code intelligence
             const resolveContext: ContextResolver<RepoSpec & RevSpec & FileSpec & ResolvedRevSpec> = ({ part }) => {
-                if (diffOrFileInfo.type === 'file') {
-                    return ensureRev(diffOrFileInfo.fileInfo)
-                } else {
-                    const fileDiff = diffOrFileInfo.fileDiff
-                    if (diffHasHead(fileDiff) && part === 'head') {
-                        return ensureRev(fileDiff.head)
-                    }
-                    if (diffHasBase(fileDiff) && part === 'base') {
-                        return ensureRev(fileDiff.base)
-                    }
-                    // TODO: confirm if we should throw an error here.
-                    throw new Error(
-                        `Could not resolve context for diff part "${part}" on a diff of type "${fileDiff.diffType}"`
-                    )
+                if (diffOrBlobInfo.type === 'blob') {
+                    return ensureRev(diffOrBlobInfo)
+                } else if (diffHasHead(diffOrBlobInfo) && part === 'head') {
+                    return ensureRev(diffOrBlobInfo.head)
                 }
+                if (diffHasBase(diffOrBlobInfo) && part === 'base') {
+                    return ensureRev(diffOrBlobInfo.base)
+                }
+                // TODO: confirm if we should throw an error here.
+                throw new Error(
+                    `Could not resolve context for diff part "${part}" on a diff of type "${diffOrBlobInfo.type}"`
+                )
             }
 
             const adjustPosition = getPositionAdjuster?.(platformContext.requestGraphQL)
@@ -1014,7 +1005,7 @@ export function handleCodeHost({
                 render(
                     <CodeViewToolbar
                         {...codeHost.codeViewToolbarClassProps}
-                        fileInfoOrError={diffOrFileInfo}
+                        fileInfoOrError={diffOrBlobInfo}
                         sourcegraphURL={sourcegraphURL}
                         telemetryService={telemetryService}
                         platformContext={platformContext}

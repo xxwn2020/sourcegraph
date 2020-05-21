@@ -7,12 +7,12 @@ import { ContributableMenu } from '../../../../shared/src/api/protocol'
 import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
 import { PlatformContextProps } from '../../../../shared/src/platform/context'
 import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { DiffOrFileInfo } from '../../libs/code_intelligence'
+import { DiffOrBlobInfoOrError, FileInfoWithContent } from '../../libs/code_intelligence'
 import { OpenDiffOnSourcegraph } from './OpenDiffOnSourcegraph'
 import { OpenOnSourcegraph } from './OpenOnSourcegraph'
 import { SignInButton } from '../../libs/code_intelligence/SignInButton'
-import { ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
 import { failedWithHTTPStatus } from '../../../../shared/src/backend/fetch'
+import { isDiff, diffHasHead, diffHasBase, ensureRev } from '../../libs/code_intelligence/util/file_info'
 
 export interface ButtonProps {
     className?: string
@@ -40,7 +40,7 @@ export interface CodeViewToolbarProps
     /**
      * Information about the file or diff the toolbar is displayed on.
      */
-    fileInfoOrError: DiffOrFileInfo | ErrorLike
+    fileInfoOrError: DiffOrBlobInfoOrError<FileInfoWithContent>
 
     buttonProps?: ButtonProps
     onSignInClose: () => void
@@ -58,8 +58,8 @@ export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = pr
             location={props.location}
             scope={props.scope}
         />{' '}
-        {isErrorLike(props.fileInfoOrError) ? (
-            failedWithHTTPStatus(props.fileInfoOrError, 401) ? (
+        {props.fileInfoOrError.type === 'error' ? (
+            failedWithHTTPStatus(props.fileInfoOrError.error, 401) ? (
                 <SignInButton
                     sourcegraphURL={props.sourcegraphURL}
                     onSignInClose={props.onSignInClose}
@@ -69,7 +69,8 @@ export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = pr
             ) : null
         ) : (
             <>
-                {props.fileInfoOrError.baseCommitID && props.fileInfoOrError.baseHasFileContents && (
+            /* TODO: should OpenDiffOnSourcegraph only exist for `modified` diffs? */
+                {(isDiff(props.fileInfoOrError) && diffHasHead(props.fileInfoOrError) && diffHasBase(props.fileInfoOrError)) ? (
                     <li className={classNames('code-view-toolbar__item', props.listItemClass)}>
                         <OpenDiffOnSourcegraph
                             ariaLabel="View file diff on Sourcegraph"
@@ -78,17 +79,17 @@ export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = pr
                             iconClassName={props.actionItemIconClass}
                             openProps={{
                                 sourcegraphURL: props.sourcegraphURL,
-                                repoName: props.fileInfoOrError.baseRepoName || props.fileInfoOrError.repoName,
-                                filePath: props.fileInfoOrError.baseFilePath || props.fileInfoOrError.filePath,
-                                rev: props.fileInfoOrError.baseRev || props.fileInfoOrError.baseCommitID,
+                                repoName: props.fileInfoOrError.base.repoName,
+                                filePath: props.fileInfoOrError.base.filePath,
+                                rev: ensureRev(props.fileInfoOrError.base).rev,
                                 query: {
                                     diff: {
-                                        rev: props.fileInfoOrError.baseCommitID,
+                                        rev: props.fileInfoOrError.base.commitID,
                                     },
                                 },
                                 commit: {
-                                    baseRev: props.fileInfoOrError.baseRev || props.fileInfoOrError.baseCommitID,
-                                    headRev: props.fileInfoOrError.rev || props.fileInfoOrError.commitID,
+                                    baseRev: ensureRev(props.fileInfoOrError.base).rev,
+                                    headRev: ensureRev(props.fileInfoOrError.head).rev
                                 },
                             }}
                         />
@@ -97,9 +98,9 @@ export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = pr
                 {
                     // Only show the "View file" button if we were able to fetch the file contents
                     // from the Sourcegraph instance
-                    !props.fileInfoOrError.baseCommitID &&
-                        (props.fileInfoOrError.content !== undefined ||
-                            props.fileInfoOrError.baseContent !== undefined) && (
+                    props.fileInfoOrError.type === 'blob' && props.fileInfoOrError.content
+                    &&
+                       (
                             <li className={classNames('code-view-toolbar__item', props.listItemClass)}>
                                 <OpenOnSourcegraph
                                     ariaLabel="View file on Sourcegraph"
@@ -109,7 +110,7 @@ export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = pr
                                         sourcegraphURL: props.sourcegraphURL,
                                         repoName: props.fileInfoOrError.repoName,
                                         filePath: props.fileInfoOrError.filePath,
-                                        rev: props.fileInfoOrError.rev || props.fileInfoOrError.commitID,
+                                        rev: ensureRev(props.fileInfoOrError).rev
                                     }}
                                 />
                             </li>

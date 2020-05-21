@@ -7,7 +7,7 @@ import { resolveRepo, resolveRev, retryWhenCloneInProgressError } from '../../..
 import {
     FileInfo,
     FileInfoWithRepoNames,
-    DiffOrFileInfo,
+    DiffOrBlobInfo,
     FileDiff,
     AddedFileDiff,
     ModifiedFileDiff,
@@ -26,49 +26,37 @@ export const ensureRevisionIsClonedForFileInfo = (
 }
 
 export const resolveRepoNamesForDiffOrFileInfo = (
-    diffOrFileInfo: DiffOrFileInfo,
+    diffOrFileInfo: DiffOrBlobInfo,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<DiffOrFileInfo<FileInfoWithRepoNames>> => {
-    if (diffOrFileInfo.type === 'file') {
-        return resolveRepoNameForFileInfo(diffOrFileInfo.fileInfo, requestGraphQL).pipe(
-            map(fileInfo => ({ ...diffOrFileInfo, fileInfo }))
+): Observable<DiffOrBlobInfo<FileInfoWithRepoNames>> => {
+    if (diffOrFileInfo.type === 'blob') {
+        return resolveRepoNameForFileInfo(diffOrFileInfo, requestGraphQL).pipe(
+            map(fileInfo => ({ ...diffOrFileInfo, ...fileInfo }))
         )
-    }
-
-    const fileDiff = diffOrFileInfo.fileDiff
-    if (diffHasBase(fileDiff) && diffHasHead(fileDiff)) {
-        const resolvingHeadWithRepoName = resolveRepoNameForFileInfo(fileDiff.head, requestGraphQL)
-        const resolvingBaseWithRepoName = resolveRepoNameForFileInfo(fileDiff.base, requestGraphQL)
+    } else if (diffHasBase(diffOrFileInfo) && diffHasHead(diffOrFileInfo)) {
+        const resolvingHeadWithRepoName = resolveRepoNameForFileInfo(diffOrFileInfo.head, requestGraphQL)
+        const resolvingBaseWithRepoName = resolveRepoNameForFileInfo(diffOrFileInfo.base, requestGraphQL)
 
         return zip(resolvingHeadWithRepoName, resolvingBaseWithRepoName).pipe(
             map(([head, base]) => ({
                 ...diffOrFileInfo,
-                fileDiff: {
-                    ...fileDiff,
-                    head,
-                    base,
-                },
+                head,
+                base,
             }))
         )
-    } else if (diffHasHead(fileDiff)) {
-        return resolveRepoNameForFileInfo(fileDiff.head, requestGraphQL).pipe(
+    } else if (diffHasHead(diffOrFileInfo)) {
+        return resolveRepoNameForFileInfo(diffOrFileInfo.head, requestGraphQL).pipe(
             map(head => ({
                 ...diffOrFileInfo,
-                fileDiff: {
-                    ...fileDiff,
-                    head,
-                },
+                head,
             }))
         )
     }
     // Remaining case: diff has only a base.
-    return resolveRepoNameForFileInfo(fileDiff.base, requestGraphQL).pipe(
+    return resolveRepoNameForFileInfo(diffOrFileInfo.base, requestGraphQL).pipe(
         map(base => ({
             ...diffOrFileInfo,
-            fileDiff: {
-                ...fileDiff,
-                base,
-            },
+            base,
         }))
     )
 }
@@ -104,13 +92,18 @@ const resolveRepoNameForFileInfo = (
     )
 
 export const diffHasHead = <T extends FileInfo>(input: FileDiff<T>): input is AddedFileDiff<T> | ModifiedFileDiff<T> =>
-    input.diffType === 'added' || input.diffType === 'modified'
+    input.type === 'added' || input.type === 'modified'
 
 export const diffHasBase = <T extends FileInfo>(
     input: FileDiff<T>
-): input is RemovedFileDiff<T> | ModifiedFileDiff<T> => input.diffType === 'removed' || input.diffType === 'modified'
+): input is RemovedFileDiff<T> | ModifiedFileDiff<T> => input.type === 'removed' || input.type === 'modified'
 
 export const ensureRev = <T extends FileInfo>(fileInfo: T): T & { rev: string } => ({
     ...fileInfo,
     rev: fileInfo.rev || fileInfo.commitID,
 })
+
+export const isDiff = <T extends FileInfo>(
+    input: DiffOrBlobInfo<T>
+): input is AddedFileDiff<T> | ModifiedFileDiff<T> | RemovedFileDiff<T> =>
+    input.type === 'added' || input.type === 'modified' || input.type === 'removed'
