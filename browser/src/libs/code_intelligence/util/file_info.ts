@@ -1,83 +1,74 @@
 import { Observable, of, zip } from 'rxjs'
-import { catchError, map, mapTo } from 'rxjs/operators'
+import { catchError, map } from 'rxjs/operators'
 
 import { isPrivateRepoPublicSourcegraphComErrorLike } from '../../../../../shared/src/backend/errors'
 import { PlatformContext } from '../../../../../shared/src/platform/context'
 import { resolveRepo, resolveRev, retryWhenCloneInProgressError } from '../../../shared/repo/backend'
 import {
     FileInfo,
-    FileDiffWithRepoNames,
-    FileDiff,
     FileInfoWithRepoNames,
-    FileDiffWithHead,
-    BaseFileDiff,
-    FileDiffWithBase,
+    DiffOrFileInfo,
+    FileDiff,
+    AddedFileDiff,
+    ModifiedFileDiff,
+    RemovedFileDiff,
 } from '../code_intelligence'
 
-export const ensureRevisionsAreCloned = (
-    fileDiff: FileDiffWithRepoNames,
+export const ensureRevisionIsClonedForFileInfo = (
+    fileInfo: FileInfoWithRepoNames,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileDiff<FileInfoWithRepoNames>> => {
+): Observable<string> => {
     // Although we get the commit SHA's from elsewhere, we still need to
     // use `resolveRev` otherwise we can't guarantee Sourcegraph has the
     // revision cloned.
-    const requests: Observable<string>[] = []
-
-    if (diffHasHead(fileDiff)) {
-        const { repoName, commitID } = fileDiff.head
-        const resolvingHeadRev = resolveRev({
-            repoName,
-            rev: commitID,
-            requestGraphQL,
-        }).pipe(retryWhenCloneInProgressError())
-        requests.push(resolvingHeadRev)
-    }
-
-    if (diffHasBase(fileDiff)) {
-        const { repoName, commitID } = fileDiff.base
-        const resolvingBaseRev = resolveRev({
-            repoName,
-            rev: commitID,
-            requestGraphQL,
-        }).pipe(retryWhenCloneInProgressError())
-        requests.push(resolvingBaseRev)
-    }
-
-    return zip(...requests).pipe(mapTo(fileDiff))
+    const { repoName, commitID } = fileInfo
+    return resolveRev({ repoName, rev: commitID, requestGraphQL }).pipe(retryWhenCloneInProgressError())
 }
 
-/**
- * Resolve a `FileInfo`'s raw repo names to their Sourcegraph
- * repo names as affected by `repositoryPathPattern`.
- */
-export const resolveRepoNames = (
-    fileDiff: FileDiff,
+export const resolveRepoNamesForDiffOrFileInfo = (
+    diffOrFileInfo: DiffOrFileInfo,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileDiffWithRepoNames> => {
+): Observable<DiffOrFileInfo<FileInfoWithRepoNames>> => {
+    if (diffOrFileInfo.type === 'file') {
+        return resolveRepoNameForFileInfo(diffOrFileInfo.fileInfo, requestGraphQL).pipe(
+            map(fileInfo => ({ ...diffOrFileInfo, fileInfo }))
+        )
+    }
+
+    const fileDiff = diffOrFileInfo.fileDiff
     if (diffHasBase(fileDiff) && diffHasHead(fileDiff)) {
-        const resolvingHeadWithRepoName = resolveFileInfoWithRepoName(fileDiff.head, requestGraphQL)
-        const resolvingBaseWithRepoName = resolveFileInfoWithRepoName(fileDiff.base, requestGraphQL)
+        const resolvingHeadWithRepoName = resolveRepoNameForFileInfo(fileDiff.head, requestGraphQL)
+        const resolvingBaseWithRepoName = resolveRepoNameForFileInfo(fileDiff.base, requestGraphQL)
 
         return zip(resolvingHeadWithRepoName, resolvingBaseWithRepoName).pipe(
             map(([head, base]) => ({
-                ...fileDiff,
-                head,
-                base,
+                ...diffOrFileInfo,
+                fileDiff: {
+                    ...fileDiff,
+                    head,
+                    base,
+                },
             }))
         )
     } else if (diffHasHead(fileDiff)) {
-        return resolveFileInfoWithRepoName(fileDiff.head, requestGraphQL).pipe(
+        return resolveRepoNameForFileInfo(fileDiff.head, requestGraphQL).pipe(
             map(head => ({
-                ...fileDiff,
-                head,
+                ...diffOrFileInfo,
+                fileDiff: {
+                    ...fileDiff,
+                    head,
+                },
             }))
         )
     }
     // Remaining case: diff has only a base.
-    return resolveFileInfoWithRepoName(fileDiff.base, requestGraphQL).pipe(
+    return resolveRepoNameForFileInfo(fileDiff.base, requestGraphQL).pipe(
         map(base => ({
-            ...fileDiff,
-            base,
+            ...diffOrFileInfo,
+            fileDiff: {
+                ...fileDiff,
+                base,
+            },
         }))
     )
 }
@@ -92,12 +83,15 @@ function useRawRepoNameAsFallback(fileInfo: FileInfo): FileInfoWithRepoNames {
     }
 }
 
-function resolveFileInfoWithRepoName(
+/**
+ * Resolve a `FileInfo`'s raw repo names to their Sourcegraph
+ * repo names as affected by `repositoryPathPattern`.
+ */
+const resolveRepoNameForFileInfo = (
     fileInfo: FileInfo,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileInfoWithRepoNames> {
-    return resolveRepo({ rawRepoName: fileInfo.rawRepoName, requestGraphQL }).pipe(
-        retryWhenCloneInProgressError(),
+): Observable<FileInfoWithRepoNames> =>
+    resolveRepo({ rawRepoName: fileInfo.rawRepoName, requestGraphQL }).pipe(
         map(repoName => ({ ...fileInfo, repoName })),
         catchError(err => {
             // ERPRIVATEREPOPUBLICSOURCEGRAPHCOM likely means that the user is viewing private code
@@ -110,12 +104,21 @@ function resolveFileInfoWithRepoName(
             throw err
         })
     )
+
+export function diffHasHead<T extends FileInfo>(input: FileDiff<T>): input is AddedFileDiff<T> | ModifiedFileDiff<T> {
+    switch (input.diffType) {
+        case 'added':
+        case 'modified':
+            return true
+    }
+    return false
 }
 
-export function diffHasHead(input: BaseFileDiff): input is FileDiffWithHead {
-    return 'head' in input
-}
-
-export function diffHasBase(input: BaseFileDiff): input is FileDiffWithBase {
-    return 'base' in input
+export function diffHasBase<T extends FileInfo>(input: FileDiff<T>): input is RemovedFileDiff<T> | ModifiedFileDiff<T> {
+    switch (input.diffType) {
+        case 'removed':
+        case 'modified':
+            return true
+    }
+    return false
 }

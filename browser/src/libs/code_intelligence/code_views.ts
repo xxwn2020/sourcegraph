@@ -8,15 +8,8 @@ import { PlatformContext } from '../../../../shared/src/platform/context'
 import { FileSpec, RepoSpec, ResolvedRevSpec, RevSpec } from '../../../../shared/src/util/url'
 import { ButtonProps } from '../../shared/components/CodeViewToolbar'
 import { fetchBlobContentLines } from '../../shared/repo/backend'
-import {
-    CodeHost,
-    FileInfoWithRepoNames,
-    FileDiffWithRepoNames,
-    FileDiffWithContent,
-    FileInfoWithContent,
-    FileDiff,
-} from './code_intelligence'
-import { ensureRevisionsAreCloned, diffHasHead, diffHasBase } from './util/file_info'
+import { CodeHost, FileInfoWithRepoNames, FileInfoWithContent, DiffOrFileInfo, FileDiff } from './code_intelligence'
+import { ensureRevisionIsClonedForFileInfo, diffHasHead, diffHasBase } from './util/file_info'
 import { trackViews, ViewResolver, ViewWithSubscriptions } from './views'
 import { MutationRecordLike } from '../../shared/util/dom'
 
@@ -56,7 +49,7 @@ export interface CodeView {
     resolveFileInfo: (
         codeView: HTMLElement,
         requestGraphQL: PlatformContext['requestGraphQL']
-    ) => Observable<FileInfo> | FileInfo
+    ) => Observable<DiffOrFileInfo> | DiffOrFileInfo
     /**
      * In some situations, we need to be able to adjust the position going into
      * and coming out of codeintellify. For example, Phabricator converts tabs
@@ -103,50 +96,62 @@ export const trackCodeViews = ({
 export const fetchFileContentForFileInfo = (
     fileInfo: FileInfoWithRepoNames,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileInfoWithContent> => {
-    return fetchBlobContentLines({
-        repoName: fileInfo.repoName,
-        filePath: fileInfo.filePath,
-        commitID: fileInfo.commitID,
-        requestGraphQL,
-    }).pipe(
+): Observable<FileInfoWithContent> =>
+    ensureRevisionIsClonedForFileInfo(fileInfo, requestGraphQL).pipe(
+        switchMap(() =>
+            fetchBlobContentLines({
+                repoName: fileInfo.repoName,
+                filePath: fileInfo.filePath,
+                commitID: fileInfo.commitID,
+                requestGraphQL,
+            })
+        ),
         map(content => {
             if (content) {
                 return { ...fileInfo, content: content.join('\n') }
-}
+            }
             return { ...fileInfo }
         }),
         catchError(err => {
             if (isPrivateRepoPublicSourcegraphComErrorLike(err)) {
+                // In this case, fileInfo will have undefined content.
                 return of(fileInfo)
             }
             throw err
         })
     )
-}
 
 export const fetchFileContentForFileDiff = (
-    fileDiff: FileDiffWithRepoNames,
+    fileDiff: FileDiff<FileInfoWithRepoNames>,
     requestGraphQL: PlatformContext['requestGraphQL']
-): Observable<FileDiffWithContent> =>
-    ensureRevisionsAreCloned(fileDiff, requestGraphQL).pipe(
-        switchMap(fileDiff => {
-            if (diffHasHead(fileDiff) && diffHasBase(fileDiff)) {
-                const fetchingBaseFile = fetchFileContentForFileInfo(fileDiff.base, requestGraphQL)
-                const fetchingHeadFile = fetchFileContentForFileInfo(fileDiff.head, requestGraphQL)
+): Observable<FileDiff<FileInfoWithContent>> => {
+    if (diffHasHead(fileDiff) && diffHasBase(fileDiff)) {
+        const fetchingBaseFile = fetchFileContentForFileInfo(fileDiff.base, requestGraphQL)
+        const fetchingHeadFile = fetchFileContentForFileInfo(fileDiff.head, requestGraphQL)
 
-            return zip(fetchingBaseFile, fetchingHeadFile).pipe(
-                    map(([base, head]) => ({
-                        ...fileDiff,
-                        head,
-                        base,
-                    }))
-                )
-            } else if (diffHasHead(fileDiff)) {
-                return fetchFileContentForFileInfo(fileDiff.head, requestGraphQL).pipe(
-                    map(head => ({ ...fileDiff, head }))
-            )
-            }
-            return fetchFileContentForFileInfo(fileDiff.base, requestGraphQL).pipe(map(base => ({ ...fileDiff, base })))
-        })
+        return zip(fetchingBaseFile, fetchingHeadFile).pipe(
+            map(([base, head]) => ({
+                ...fileDiff,
+                head,
+                base,
+            }))
+        )
+    } else if (diffHasHead(fileDiff)) {
+        return fetchFileContentForFileInfo(fileDiff.head, requestGraphQL).pipe(map(head => ({ ...fileDiff, head })))
+    }
+    return fetchFileContentForFileInfo(fileDiff.base, requestGraphQL).pipe(map(base => ({ ...fileDiff, base })))
+}
+
+export const fetchFileContentForDiffOrFileInfo = (
+    diffOrFileInfo: DiffOrFileInfo<FileInfoWithRepoNames>,
+    requestGraphQL: PlatformContext['requestGraphQL']
+): Observable<DiffOrFileInfo<FileInfoWithContent>> => {
+    if (diffOrFileInfo.type === 'file') {
+        return fetchFileContentForFileInfo(diffOrFileInfo.fileInfo, requestGraphQL).pipe(
+            map(fileInfo => ({ ...diffOrFileInfo, fileInfo }))
+        )
+    }
+    return fetchFileContentForFileDiff(diffOrFileInfo.fileDiff, requestGraphQL).pipe(
+        map(fileDiff => ({ ...diffOrFileInfo, fileDiff }))
     )
+}

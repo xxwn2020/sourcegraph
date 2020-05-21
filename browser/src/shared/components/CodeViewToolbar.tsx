@@ -7,7 +7,7 @@ import { ContributableMenu } from '../../../../shared/src/api/protocol'
 import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
 import { PlatformContextProps } from '../../../../shared/src/platform/context'
 import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { FileInfoWithContents } from '../../libs/code_intelligence/code_views'
+import { DiffOrFileInfo } from '../../libs/code_intelligence'
 import { OpenDiffOnSourcegraph } from './OpenDiffOnSourcegraph'
 import { OpenOnSourcegraph } from './OpenOnSourcegraph'
 import { SignInButton } from '../../libs/code_intelligence/SignInButton'
@@ -40,7 +40,7 @@ export interface CodeViewToolbarProps
     /**
      * Information about the file or diff the toolbar is displayed on.
      */
-    fileInfoOrError: FileInfoWithContents | ErrorLike
+    fileInfoOrError: DiffOrFileInfo | ErrorLike
 
     buttonProps?: ButtonProps
     onSignInClose: () => void

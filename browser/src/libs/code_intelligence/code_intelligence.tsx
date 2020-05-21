@@ -5,6 +5,7 @@ import {
     Hoverifier,
     HoverState,
     MaybeLoadingResult,
+    DiffPart,
 } from '@sourcegraph/codeintellify'
 import { TextDocumentDecoration } from '@sourcegraph/extension-api-types'
 import * as H from 'history'
@@ -92,7 +93,7 @@ import { bitbucketServerCodeHost } from '../bitbucket/code_intelligence'
 import { githubCodeHost } from '../github/code_intelligence'
 import { gitlabCodeHost } from '../gitlab/code_intelligence'
 import { phabricatorCodeHost } from '../phabricator/code_intelligence'
-import { CodeView, fetchFileContentForFileDiff, trackCodeViews } from './code_views'
+import { CodeView, fetchFileContentForDiffOrFileInfo, trackCodeViews } from './code_views'
 import { ContentView, handleContentViews } from './content_views'
 import { applyDecorations, initializeExtensions, renderCommandPalette, renderGlobalDebug } from './extensions'
 import { ViewOnSourcegraphButtonClassProps, ViewOnSourcegraphButton } from './external_links'
@@ -104,7 +105,7 @@ import {
     registerNativeTooltipContributions,
 } from './native_tooltips'
 import { handleTextFields, TextField } from './text_fields'
-import { resolveRepoNames } from './util/file_info'
+import { resolveRepoNamesForDiffOrFileInfo, diffHasHead, diffHasBase } from './util/file_info'
 import { delayUntilIntersecting, ViewResolver } from './views'
 
 import { IS_LIGHT_THEME } from './consts'
@@ -259,53 +260,52 @@ export interface CodeHost extends ApplyLinkPreviewOptions {
     codeViewsRequireTokenization?: boolean
 }
 
-export interface BaseFileDiff {
-    diffType: string
-}
-export type FileDiff<T extends FileInfo = FileInfo> = AddedFileDiff<T> | ModifiedFileDiff<T> | RemovedFileDiff<T>
-export interface AddedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithHead<T> {
-    diffType: 'added'
-}
-export interface ModifiedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithHead<T>, FileDiffWithBase<T> {
-    diffType: 'modified'
-}
-export interface RemovedFileDiff<T extends FileInfo = FileInfo> extends FileDiffWithBase<T> {
-    diffType: 'removed'
-}
-export type FileDiffWithContent = FileDiff<FileInfoWithContent>
-export type FileDiffWithRepoNames = FileDiff<FileInfoWithRepoNames>
+export type DiffOrFileInfo<T extends FileInfo = FileInfo> =
+    | {
+          type: 'diff'
+          fileDiff: FileDiff<T>
+      }
+    | {
+          type: 'file'
+          fileInfo: T
+      }
 
-export interface FileDiffWithHead<T extends FileInfo = FileInfo> extends BaseFileDiff {
+export type FileDiff<T extends FileInfo = FileInfo> = AddedFileDiff<T> | ModifiedFileDiff<T> | RemovedFileDiff<T>
+export interface AddedFileDiff<T extends FileInfo = FileInfo> {
+    diffType: 'added'
     head: T
 }
-export interface FileDiffWithBase<T extends FileInfo = FileInfo> extends BaseFileDiff {
+export interface ModifiedFileDiff<T extends FileInfo = FileInfo> {
+    diffType: 'modified'
+    head: T
+    base: T
+}
+export interface RemovedFileDiff<T extends FileInfo = FileInfo> {
+    diffType: 'removed'
     base: T
 }
 
 export interface FileInfo {
     /**
-     * The path for the repo the file belongs to. If a `baseRepoName` is provided, this value
-     * is treated as the head repo name.
+     * The path for the repo the file belongs to.
      */
     rawRepoName: string
     /**
-     * The path for the file path for a given `codeView`. If a `baseFilePath` is provided, this value
-     * is treated as the head file path.
+     * The path for the file path for a given `codeView`.
      */
     filePath: string
     /**
-     * The commit that the code view is at. If a `baseCommitID` is provided, this value is treated
-     * as the head commit ID.
+     * The commit that the code view is at.
      */
     commitID: string
     /**
-     * The revision the code view is at. If a `baseRev` is provided, this value is treated as the head rev.
+     * The revision the code view is at.
      */
     rev?: string
 }
 
 export interface FileInfoWithRepoNames extends FileInfo, RepoSpec {}
-export interface FileInfoWithContent extends FileInfo {
+export interface FileInfoWithContent extends FileInfoWithRepoNames {
     content?: string
 }
 
@@ -733,11 +733,13 @@ export function handleCodeHost({
             asObservable(() =>
                 codeViewEvent.resolveFileInfo(codeViewEvent.element, platformContext.requestGraphQL)
             ).pipe(
-                mergeMap(fileInfo => resolveRepoNames(fileInfo, platformContext.requestGraphQL)),
-                mergeMap(fileInfo =>
-                    fetchFileContents(fileInfo, platformContext.requestGraphQL).pipe(
-                        map(fileInfoWithContents => ({
-                            fileInfo: fileInfoWithContents,
+                mergeMap(diffOrFileInfo =>
+                    resolveRepoNamesForDiffOrFileInfo(diffOrFileInfo, platformContext.requestGraphQL)
+                ),
+                mergeMap(diffOrFileInfo =>
+                    fetchFileContentForDiffOrFileInfo(diffOrFileInfo, platformContext.requestGraphQL).pipe(
+                        map(diffOrFileInfo => ({
+                            diffOrFileInfo,
                             ...codeViewEvent,
                         }))
                     )
@@ -837,77 +839,73 @@ export function handleCodeHost({
             console.log('Code view added')
             codeViewEvent.subscriptions.add(() => console.log('Code view removed'))
 
-            const { element, fileInfo, getPositionAdjuster, getToolbarMount, toolbarButtonProps } = codeViewEvent
-            const uri = toURIWithPath(fileInfo)
-            const languageId = getModeFromPath(fileInfo.filePath)
-            const model = { uri, languageId, text: fileInfo.content }
-            // Only add the model if it doesn't exist
-            // (there may be several code views on the page pointing to the same model)
-            if (!extensionsController.services.model.hasModel(uri)) {
-                extensionsController.services.model.addModel(model)
-            }
-            const editorData: CodeEditorData = {
-                type: 'CodeEditor' as const,
-                resource: uri,
-                selections: codeViewEvent.getSelections ? codeViewEvent.getSelections(codeViewEvent.element) : [],
-                isActive: true,
-            }
-            const editorId = extensionsController.services.viewer.addViewer(editorData)
-            const scope: CodeEditorWithPartialModel = {
-                ...editorData,
-                ...editorId,
-                model,
-            }
-            const rootURI = toRootURI(fileInfo)
-            addRootRef(rootURI, fileInfo.rev)
-            codeViewEvent.subscriptions.add(() => {
-                deleteRootRef(rootURI)
-                extensionsController.services.viewer.removeViewer(editorId)
-            })
+            const { element, diffOrFileInfo, getPositionAdjuster, getToolbarMount, toolbarButtonProps } = codeViewEvent
 
-            if (codeViewEvent.observeSelections) {
-                codeViewEvent.subscriptions.add(
-                    // This nested subscription is necessary, it is managed correctly through `codeViewEvent.subscriptions`
-                    // eslint-disable-next-line rxjs/no-nested-subscribe
-                    codeViewEvent.observeSelections(codeViewEvent.element).subscribe(selections => {
-                        extensionsController.services.viewer.setSelections(editorId, selections)
-                    })
-                )
-            }
+            const initializeModelAndViewerForFileInfo = (
+                fileInfo: FileInfoWithContent & FileInfoWithRepoNames,
+                useSelections?: boolean
+            ): CodeEditorWithPartialModel => {
+                const uri = toURIWithPath(fileInfo)
 
-            // When codeView is a diff (and not an added file), add BASE too.
-            if (fileInfo.baseContent && fileInfo.baseRepoName && fileInfo.baseCommitID && fileInfo.baseFilePath) {
-                const uri = toURIWithPath({
-                    repoName: fileInfo.baseRepoName,
-                    commitID: fileInfo.baseCommitID,
-                    filePath: fileInfo.baseFilePath,
-                })
+                // Add model
+                const languageId = getModeFromPath(fileInfo.filePath)
+                const model = { uri, languageId, text: fileInfo.content }
                 // Only add the model if it doesn't exist
                 // (there may be several code views on the page pointing to the same model)
                 if (!extensionsController.services.model.hasModel(uri)) {
-                    extensionsController.services.model.addModel({
-                        uri,
-                        languageId: getModeFromPath(fileInfo.baseFilePath),
-                        text: fileInfo.baseContent,
-                    })
+                    extensionsController.services.model.addModel(model)
                 }
-                const editor = extensionsController.services.viewer.addViewer({
+
+                // Add viewer
+                const editorSelections =
+                    useSelections && codeViewEvent.getSelections
+                        ? codeViewEvent.getSelections(codeViewEvent.element)
+                        : []
+
+                const editorData: CodeEditorData = {
                     type: 'CodeEditor' as const,
                     resource: uri,
-                    // There is no notion of a selection on diff views yet, so this is empty.
-                    selections: [],
+                    selections: editorSelections,
                     isActive: true,
-                })
-                const baseRootURI = toRootURI({
-                    repoName: fileInfo.baseRepoName,
-                    commitID: fileInfo.baseCommitID,
-                })
-                addRootRef(baseRootURI, fileInfo.baseRev)
+                }
+                const editorId = extensionsController.services.viewer.addViewer(editorData)
+
+                // Add root ref
+                const rootURI = toRootURI(fileInfo)
+                addRootRef(rootURI, fileInfo.rev)
+
+                // Subscribe for removal
                 codeViewEvent.subscriptions.add(() => {
-                    deleteRootRef(baseRootURI)
-                    extensionsController.services.viewer.removeViewer(editor)
+                    deleteRootRef(rootURI)
+                    extensionsController.services.viewer.removeViewer(editorId)
                 })
+
+                return {
+                    ...editorData,
+                    ...editorId,
+                    model,
+                }
             }
+
+            const initializeModelAndViewerForDiffOrFileInfo = (
+                diffOrFileInfo: DiffOrFileInfo<FileInfoWithContent>
+            ): CodeEditorWithPartialModel => {
+                if (diffOrFileInfo.type === 'file') {
+                    return initializeModelAndViewerForFileInfo(diffOrFileInfo.fileInfo, true)
+                } else {
+                    const fileDiff = diffOrFileInfo.fileDiff
+                    if (diffHasHead(fileDiff) && diffHasBase(fileDiff)) {
+                        const editor = initializeModelAndViewerForFileInfo(fileDiff.head, true)
+                        initializeModelAndViewerForFileInfo(fileDiff.base)
+                        return editor
+                    } else if (diffHasBase(fileDiff)) {
+                        return initializeModelAndViewerForFileInfo(fileDiff.base, true)
+                    }
+                    return initializeModelAndViewerForFileInfo(fileDiff.head, true)
+                }
+            }
+
+            const codeEditorWithPartialModel = initializeModelAndViewerForDiffOrFileInfo(diffOrFileInfo)
 
             const domFunctions = {
                 ...codeViewEvent.dom,
@@ -922,8 +920,7 @@ export function handleCodeHost({
                         : codeViewEvent.dom.getCodeElementFromTarget(target),
             }
 
-            // Apply decorations coming from extensions
-            if (!minimalUI) {
+            const applyDecorationsForFileInfo = (fileInfo: FileInfoWithContent, diffPart?: DiffPart) => {
                 let decorationsByLine: DecorationMapByLine = new Map()
                 const update = (decorations?: TextDocumentDecoration[] | null): void => {
                     try {
@@ -932,7 +929,7 @@ export function handleCodeHost({
                             element,
                             decorations || [],
                             decorationsByLine,
-                            fileInfo.baseCommitID ? 'head' : undefined
+                            diffPart
                         )
                     } catch (err) {
                         console.error('Could not apply head decorations to code view', codeViewEvent.element, err)
@@ -949,46 +946,45 @@ export function handleCodeHost({
                         .subscribe(update)
                 )
             }
-            if (fileInfo.baseCommitID && fileInfo.baseFilePath) {
-                let decorationsByLine: DecorationMapByLine = new Map()
-                const update = (decorations?: TextDocumentDecoration[] | null): void => {
-                    try {
-                        decorationsByLine = applyDecorations(
-                            domFunctions,
-                            element,
-                            decorations || [],
-                            decorationsByLine,
-                            'base'
-                        )
-                    } catch (err) {
-                        console.error('Could not apply base decorations to code view', codeViewEvent.element, err)
+
+            // Apply decorations coming from extensions
+            if (!minimalUI) {
+                if (diffOrFileInfo.type === 'file') {
+                    applyDecorationsForFileInfo(diffOrFileInfo.fileInfo)
+                } else {
+                    if (diffHasHead(diffOrFileInfo.fileDiff)) {
+                        applyDecorationsForFileInfo(diffOrFileInfo.fileDiff.head, 'head')
+                    }
+                    if (diffHasBase(diffOrFileInfo.fileDiff)) {
+                        applyDecorationsForFileInfo(diffOrFileInfo.fileDiff.base, 'base')
                     }
                 }
-                codeViewEvent.subscriptions.add(
-                    extensionsController.services.textDocumentDecoration
-                        .getDecorations(
-                            toTextDocumentIdentifier({
-                                repoName: fileInfo.baseRepoName || fileInfo.repoName, // not sure if all code hosts set baseRepoName
-                                commitID: fileInfo.baseCommitID,
-                                filePath: fileInfo.baseFilePath,
-                            })
-                        )
-                        // Make sure decorations get cleaned up on unsubscription
-                        .pipe(finalize(update))
-                        // The nested subscribe cannot be replaced with a switchMap()
-                        // We manage the subscription correctly.
-                        // eslint-disable-next-line rxjs/no-nested-subscribe
-                        .subscribe(update)
-                )
             }
 
-            // Add hover code intelligence
-            const resolveContext: ContextResolver<RepoSpec & RevSpec & FileSpec & ResolvedRevSpec> = ({ part }) => ({
-                repoName: part === 'base' ? fileInfo.baseRepoName || fileInfo.repoName : fileInfo.repoName,
-                commitID: part === 'base' ? fileInfo.baseCommitID! : fileInfo.commitID,
-                filePath: part === 'base' ? fileInfo.baseFilePath || fileInfo.filePath : fileInfo.filePath,
-                rev: part === 'base' ? fileInfo.baseRev || fileInfo.baseCommitID! : fileInfo.rev || fileInfo.commitID,
+            const ensureRev = <T extends FileInfo>(fileInfo: T): T & RevSpec => ({
+                ...fileInfo,
+                rev: fileInfo.rev || fileInfo.commitID,
             })
+
+            // Add hover code intelligence
+            const resolveContext: ContextResolver<RepoSpec & RevSpec & FileSpec & ResolvedRevSpec> = ({ part }) => {
+                if (diffOrFileInfo.type === 'file') {
+                    return ensureRev(diffOrFileInfo.fileInfo)
+                } else {
+                    const fileDiff = diffOrFileInfo.fileDiff
+                    if (diffHasHead(fileDiff) && part === 'head') {
+                        return ensureRev(fileDiff.head)
+                    }
+                    if (diffHasBase(fileDiff) && part === 'base') {
+                        return ensureRev(fileDiff.base)
+                    }
+                    // TODO: confirm if we should throw an error here.
+                    throw new Error(
+                        `Could not resolve context for diff part "${part}" on a diff of type "${fileDiff.diffType}"`
+                    )
+                }
+            }
+
             const adjustPosition = getPositionAdjuster?.(platformContext.requestGraphQL)
             let hoverSubscription = new Subscription()
             codeViewEvent.subscriptions.add(
@@ -1023,14 +1019,14 @@ export function handleCodeHost({
                 render(
                     <CodeViewToolbar
                         {...codeHost.codeViewToolbarClassProps}
-                        fileInfoOrError={fileInfo}
+                        fileInfoOrError={diffOrFileInfo}
                         sourcegraphURL={sourcegraphURL}
                         telemetryService={telemetryService}
                         platformContext={platformContext}
                         extensionsController={extensionsController}
                         buttonProps={toolbarButtonProps}
                         location={H.createLocation(window.location)}
-                        scope={scope}
+                        scope={codeEditorWithPartialModel}
                         onSignInClose={nextSignInClose}
                     />,
                     mount
