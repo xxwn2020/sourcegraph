@@ -105,7 +105,7 @@ import {
     registerNativeTooltipContributions,
 } from './native_tooltips'
 import { handleTextFields, TextField } from './text_fields'
-import { resolveRepoNamesForDiffOrFileInfo, diffHasHead, diffHasBase } from './util/file_info'
+import { resolveRepoNamesForDiffOrFileInfo, diffHasHead, diffHasBase, ensureRev } from './util/file_info'
 import { delayUntilIntersecting, ViewResolver } from './views'
 
 import { IS_LIGHT_THEME } from './consts'
@@ -960,11 +960,6 @@ export function handleCodeHost({
                     }
                 }
             }
-
-            const ensureRev = <T extends FileInfo>(fileInfo: T): T & RevSpec => ({
-                ...fileInfo,
-                rev: fileInfo.rev || fileInfo.commitID,
-            })
 
             // Add hover code intelligence
             const resolveContext: ContextResolver<RepoSpec & RevSpec & FileSpec & ResolvedRevSpec> = ({ part }) => {

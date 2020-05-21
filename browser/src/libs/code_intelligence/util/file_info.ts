@@ -76,12 +76,10 @@ export const resolveRepoNamesForDiffOrFileInfo = (
 /**
  * Use `rawRepoName` for the value of `repoName`, as a fallback if `repoName` was not available.
  * */
-function useRawRepoNameAsFallback(fileInfo: FileInfo): FileInfoWithRepoNames {
-    return {
-        ...fileInfo,
-        repoName: fileInfo.rawRepoName,
-    }
-}
+const useRawRepoNameAsFallback = (fileInfo: FileInfo): FileInfoWithRepoNames => ({
+    ...fileInfo,
+    repoName: fileInfo.rawRepoName,
+})
 
 /**
  * Resolve a `FileInfo`'s raw repo names to their Sourcegraph
@@ -105,20 +103,14 @@ const resolveRepoNameForFileInfo = (
         })
     )
 
-export function diffHasHead<T extends FileInfo>(input: FileDiff<T>): input is AddedFileDiff<T> | ModifiedFileDiff<T> {
-    switch (input.diffType) {
-        case 'added':
-        case 'modified':
-            return true
-    }
-    return false
-}
+export const diffHasHead = <T extends FileInfo>(input: FileDiff<T>): input is AddedFileDiff<T> | ModifiedFileDiff<T> =>
+    input.diffType === 'added' || input.diffType === 'modified'
 
-export function diffHasBase<T extends FileInfo>(input: FileDiff<T>): input is RemovedFileDiff<T> | ModifiedFileDiff<T> {
-    switch (input.diffType) {
-        case 'removed':
-        case 'modified':
-            return true
-    }
-    return false
-}
+export const diffHasBase = <T extends FileInfo>(
+    input: FileDiff<T>
+): input is RemovedFileDiff<T> | ModifiedFileDiff<T> => input.diffType === 'removed' || input.diffType === 'modified'
+
+export const ensureRev = <T extends FileInfo>(fileInfo: T): T & { rev: string } => ({
+    ...fileInfo,
+    rev: fileInfo.rev || fileInfo.commitID,
+})
