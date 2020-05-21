@@ -12,7 +12,8 @@ func maybeMonitoring() ([]string, error) {
 	if os.Getenv("DISABLE_MONITORING") == "" {
 		return []string{""}, nil
 	}
-	return []string{prometheusProcLine,
+	return []string{
+		prometheusProcLine,
 		grafanaProcLine,
 		jagerProcLine}, nil
 }
