@@ -49,10 +49,10 @@ All interactions with the code host are performed by your individual user accoun
 - Updating a changeset
 - Closing a changeset
 
-If you attempt to perform these operations and haven't yet linked your code host account to your Sourcegraph account, you'll be prompted to do  so. You can either:
+If you attempt to perform these operations and haven't yet linked your code host account to your Sourcegraph account, you'll be prompted to do so. You can either:
 
-- Sign in via your code host (e.g., with GitHub user authentication, if the site admin has enabled that)
 - Manually enter a personal access token in your user profile
+- Sign in via your code host (currently only supported for GitHub; requires a site admin to [configure GitHub user authentication](../../admin/auth/index.md#github))
 
 ## Repository permissions for campaigns
 
