@@ -21,6 +21,8 @@ With campaigns, making large-scale changes becomes:
 
 <!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
 
+<!-- TODO(sqs): define changesets (==PRs/MRs/diffs) -->
+
 ## Viewing campaigns
 
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
@@ -31,9 +33,13 @@ With campaigns, making large-scale changes becomes:
 
 Any user can create a campaign.
 
-## Specifying what changes to make
+## Adding patches to specify what changes to make
 
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
+
+After [creating a campaign](#creating-a-campaign), you can provide a list of patches. A patch is a change (in diff format) to a specific repository on a specific branch. The campaign will let you preview the changesets that will be created from the patches, and when you're ready, you can publish the changesets to the code hosts.
+
+To provide a list of patches: <!-- TODO!(sqs) -->
 
 You can update a campaign's changes at any time, even after you've published changesets. For more information, see "[Updating a campaign](#updating-a-campaign)".
 
