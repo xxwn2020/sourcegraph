@@ -18,8 +18,12 @@ type RepoUsageStatistics struct {
 // code intelligence activity within the last week grouped by repository. The resulting slice is ordered
 // by search then precise event counts.
 func (db *dbImpl) RepoUsageStatistics(ctx context.Context) ([]RepoUsageStatistics, error) {
-	countsByName, err := scanCountsByName(db.query(ctx, sqlf.Sprintf(`
-		SELECT sub.* FROM (
+	stats, err := scanRepoUsageStatisticsSlice(db.query(ctx, sqlf.Sprintf(`
+		SELECT
+			r.id,
+			counts.search_count,
+			counts.precise_count
+		FROM (
 			SELECT
 				substring(url from '//[^/]+/(.+)/-/') AS repo_name,
 				COUNT(*) FILTER (WHERE name LIKE 'codeintel.search%%%%') AS search_count,
@@ -27,35 +31,11 @@ func (db *dbImpl) RepoUsageStatistics(ctx context.Context) ([]RepoUsageStatistic
 			FROM event_logs
 			WHERE timestamp >= NOW() - INTERVAL '1 week'
 			GROUP BY repo_name
-		) sub
-		WHERE EXISTS (SELECT * FROM repo r WHERE r.uri = sub.repo_name)
+		) counts
+		JOIN repo r ON r.uri = counts.repo_name
 	`)))
 	if err != nil {
 		return nil, err
-	}
-
-	var names []string
-	for name := range countsByName {
-		names = append(names, name)
-	}
-
-	ids, err := db.RepoIDs(ctx, names)
-	if err != nil {
-		return nil, err
-	}
-
-	var stats []RepoUsageStatistics
-	for name, count := range countsByName {
-		repositoryID, ok := ids[name]
-		if !ok {
-			continue
-		}
-
-		stats = append(stats, RepoUsageStatistics{
-			RepositoryID: repositoryID,
-			SearchCount:  count.SearchCount,
-			PreciseCount: count.PreciseCount,
-		})
 	}
 
 	sort.Slice(stats, func(i, j int) bool {

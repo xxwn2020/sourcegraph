@@ -51,7 +51,6 @@ type ObservedDB struct {
 	dequeueIndexOperation              *observation.Operation
 	repoUsageStatisticsOperation       *observation.Operation
 	repoNameOperation                  *observation.Operation
-	repoIDsOperation                   *observation.Operation
 }
 
 var _ DB = &ObservedDB{}
@@ -262,11 +261,6 @@ func NewObserved(db DB, observationContext *observation.Context) DB {
 			MetricLabels: []string{"repo_name"},
 			Metrics:      metrics,
 		}),
-		repoIDsOperation: observationContext.Operation(observation.Op{
-			Name:         "DB.RepoIDs",
-			MetricLabels: []string{"repo_ids"},
-			Metrics:      metrics,
-		}),
 	}
 }
 
@@ -317,7 +311,6 @@ func (db *ObservedDB) wrap(other DB) DB {
 		dequeueIndexOperation:              db.dequeueIndexOperation,
 		repoUsageStatisticsOperation:       db.repoUsageStatisticsOperation,
 		repoNameOperation:                  db.repoNameOperation,
-		repoIDsOperation:                   db.repoIDsOperation,
 	}
 }
 
@@ -611,11 +604,4 @@ func (db *ObservedDB) RepoName(ctx context.Context, repositoryID int) (_ string,
 	ctx, endObservation := db.repoNameOperation.With(ctx, &err, observation.Args{})
 	defer endObservation(1, observation.Args{})
 	return db.db.RepoName(ctx, repositoryID)
-}
-
-// RepoIDs calls into the inner DB and registers the observed results.
-func (db *ObservedDB) RepoIDs(ctx context.Context, names []string) (_ map[string]int, err error) {
-	ctx, endObservation := db.repoIDsOperation.With(ctx, &err, observation.Args{})
-	defer endObservation(1, observation.Args{})
-	return db.db.RepoIDs(ctx, names)
 }

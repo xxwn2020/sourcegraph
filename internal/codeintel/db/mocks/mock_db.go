@@ -98,9 +98,6 @@ type MockDB struct {
 	// QueueSizeFunc is an instance of a mock function object controlling
 	// the behavior of the method QueueSize.
 	QueueSizeFunc *DBQueueSizeFunc
-	// RepoIDsFunc is an instance of a mock function object controlling the
-	// behavior of the method RepoIDs.
-	RepoIDsFunc *DBRepoIDsFunc
 	// RepoNameFunc is an instance of a mock function object controlling the
 	// behavior of the method RepoName.
 	RepoNameFunc *DBRepoNameFunc
@@ -285,11 +282,6 @@ func NewMockDB() *MockDB {
 				return 0, nil
 			},
 		},
-		RepoIDsFunc: &DBRepoIDsFunc{
-			defaultHook: func(context.Context, []string) (map[string]int, error) {
-				return nil, nil
-			},
-		},
 		RepoNameFunc: &DBRepoNameFunc{
 			defaultHook: func(context.Context, int) (string, error) {
 				return "", nil
@@ -440,9 +432,6 @@ func NewMockDBFrom(i db.DB) *MockDB {
 		},
 		QueueSizeFunc: &DBQueueSizeFunc{
 			defaultHook: i.QueueSize,
-		},
-		RepoIDsFunc: &DBRepoIDsFunc{
-			defaultHook: i.RepoIDs,
 		},
 		RepoNameFunc: &DBRepoNameFunc{
 			defaultHook: i.RepoName,
@@ -3574,114 +3563,6 @@ func (c DBQueueSizeFuncCall) Args() []interface{} {
 // Results returns an interface slice containing the results of this
 // invocation.
 func (c DBQueueSizeFuncCall) Results() []interface{} {
-	return []interface{}{c.Result0, c.Result1}
-}
-
-// DBRepoIDsFunc describes the behavior when the RepoIDs method of the
-// parent MockDB instance is invoked.
-type DBRepoIDsFunc struct {
-	defaultHook func(context.Context, []string) (map[string]int, error)
-	hooks       []func(context.Context, []string) (map[string]int, error)
-	history     []DBRepoIDsFuncCall
-	mutex       sync.Mutex
-}
-
-// RepoIDs delegates to the next hook function in the queue and stores the
-// parameter and result values of this invocation.
-func (m *MockDB) RepoIDs(v0 context.Context, v1 []string) (map[string]int, error) {
-	r0, r1 := m.RepoIDsFunc.nextHook()(v0, v1)
-	m.RepoIDsFunc.appendCall(DBRepoIDsFuncCall{v0, v1, r0, r1})
-	return r0, r1
-}
-
-// SetDefaultHook sets function that is called when the RepoIDs method of
-// the parent MockDB instance is invoked and the hook queue is empty.
-func (f *DBRepoIDsFunc) SetDefaultHook(hook func(context.Context, []string) (map[string]int, error)) {
-	f.defaultHook = hook
-}
-
-// PushHook adds a function to the end of hook queue. Each invocation of the
-// RepoIDs method of the parent MockDB instance inovkes the hook at the
-// front of the queue and discards it. After the queue is empty, the default
-// hook function is invoked for any future action.
-func (f *DBRepoIDsFunc) PushHook(hook func(context.Context, []string) (map[string]int, error)) {
-	f.mutex.Lock()
-	f.hooks = append(f.hooks, hook)
-	f.mutex.Unlock()
-}
-
-// SetDefaultReturn calls SetDefaultDefaultHook with a function that returns
-// the given values.
-func (f *DBRepoIDsFunc) SetDefaultReturn(r0 map[string]int, r1 error) {
-	f.SetDefaultHook(func(context.Context, []string) (map[string]int, error) {
-		return r0, r1
-	})
-}
-
-// PushReturn calls PushDefaultHook with a function that returns the given
-// values.
-func (f *DBRepoIDsFunc) PushReturn(r0 map[string]int, r1 error) {
-	f.PushHook(func(context.Context, []string) (map[string]int, error) {
-		return r0, r1
-	})
-}
-
-func (f *DBRepoIDsFunc) nextHook() func(context.Context, []string) (map[string]int, error) {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
-
-	if len(f.hooks) == 0 {
-		return f.defaultHook
-	}
-
-	hook := f.hooks[0]
-	f.hooks = f.hooks[1:]
-	return hook
-}
-
-func (f *DBRepoIDsFunc) appendCall(r0 DBRepoIDsFuncCall) {
-	f.mutex.Lock()
-	f.history = append(f.history, r0)
-	f.mutex.Unlock()
-}
-
-// History returns a sequence of DBRepoIDsFuncCall objects describing the
-// invocations of this function.
-func (f *DBRepoIDsFunc) History() []DBRepoIDsFuncCall {
-	f.mutex.Lock()
-	history := make([]DBRepoIDsFuncCall, len(f.history))
-	copy(history, f.history)
-	f.mutex.Unlock()
-
-	return history
-}
-
-// DBRepoIDsFuncCall is an object that describes an invocation of method
-// RepoIDs on an instance of MockDB.
-type DBRepoIDsFuncCall struct {
-	// Arg0 is the value of the 1st argument passed to this method
-	// invocation.
-	Arg0 context.Context
-	// Arg1 is the value of the 2nd argument passed to this method
-	// invocation.
-	Arg1 []string
-	// Result0 is the value of the 1st result returned from this method
-	// invocation.
-	Result0 map[string]int
-	// Result1 is the value of the 2nd result returned from this method
-	// invocation.
-	Result1 error
-}
-
-// Args returns an interface slice containing the arguments of this
-// invocation.
-func (c DBRepoIDsFuncCall) Args() []interface{} {
-	return []interface{}{c.Arg0, c.Arg1}
-}
-
-// Results returns an interface slice containing the results of this
-// invocation.
-func (c DBRepoIDsFuncCall) Results() []interface{} {
 	return []interface{}{c.Result0, c.Result1}
 }
 

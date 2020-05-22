@@ -410,66 +410,30 @@ func scanFirstIndexDequeue(rows *sql.Rows, err error) (interface{}, bool, error)
 	return scanFirstIndex(rows, err)
 }
 
-// scanNameCount populates a repository name and a pair of counts from the given scanner.
-func scanNameCount(scanner scanner) (name string, searchCount, preciseCount int, err error) {
-	err = scanner.Scan(&name, &searchCount, &preciseCount)
-	return name, searchCount, preciseCount, err
+// scanRepoUsageStatistics populates a RepoUsageStatistics from the given scanner.
+func scanRepoUsageStatistics(scanner scanner) (stats RepoUsageStatistics, err error) {
+	err = scanner.Scan(&stats.RepositoryID, &stats.SearchCount, &stats.PreciseCount)
+	return stats, err
 }
 
-type Counts struct {
-	SearchCount  int
-	PreciseCount int
-}
-
-// scanCountsByName reads the given set of `(name, search_count, precise_count)` rows
-// and returns  a map from names to counts. This method should be called directly from
-// the return value of `*db.query`.
-func scanCountsByName(rows *sql.Rows, err error) (map[string]Counts, error) {
+// scanRepoUsageStatisticsSlice reads the given set of repo usage stat rows and returns
+// a slice of RepoUsageStatistics values. This method should be called directly from the
+// return value of `*db.query`.
+func scanRepoUsageStatisticsSlice(rows *sql.Rows, err error) ([]RepoUsageStatistics, error) {
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	counts := map[string]Counts{}
+	var stats []RepoUsageStatistics
 	for rows.Next() {
-		name, searchCount, preciseCount, err := scanNameCount(rows)
+		s, err := scanRepoUsageStatistics(rows)
 		if err != nil {
 			return nil, err
 		}
 
-		counts[name] = Counts{
-			SearchCount:  searchCount,
-			PreciseCount: preciseCount,
-		}
+		stats = append(stats, s)
 	}
 
-	return counts, nil
-}
-
-// scanRepoID populates a repository name and its id from the given scanner.
-func scanRepoID(scanner scanner) (name string, id int, err error) {
-	err = scanner.Scan(&name, &id)
-	return name, id, err
-}
-
-// scanRepoIDs reads the given set of `(name, id)` rows and returns a map from
-// names to identifiers. This method should be called directly from the return value of
-// `*db.query`.
-func scanRepoIDs(rows *sql.Rows, err error) (map[string]int, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	repoIDs := map[string]int{}
-	for rows.Next() {
-		name, id, err := scanRepoID(rows)
-		if err != nil {
-			return nil, err
-		}
-
-		repoIDs[name] = id
-	}
-
-	return repoIDs, nil
+	return stats, nil
 }

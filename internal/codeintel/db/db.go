@@ -167,9 +167,6 @@ type DB interface {
 
 	// RepoName returns the name for the repo with the given identifier.
 	RepoName(ctx context.Context, repositoryID int) (string, error)
-
-	// RepoIDs returns the identifiers for the repos with the given names.
-	RepoIDs(ctx context.Context, names []string) (map[string]int, error)
 }
 
 // GetTipCommitFn returns the head commit for the given repository.
