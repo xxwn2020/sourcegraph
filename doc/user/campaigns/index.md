@@ -1,23 +1,43 @@
 # Campaigns
 
->NOTE: **Campaigns are currently in beta.** We're actively building out the feature set and improving the user experience with every update. Let us know what you think! [File an issue](https://github.com/sourcegraph/sourcegraph) with feedback/problems/questions, or [contact us directly](https://about.sourcegraph.com/contact).
+Campaigns let you make large-scale code changes. A campaign is like a cross-repository pull request. You create a campaign and tell it what changes to make (by providing a script to run). The campaign then creates pull requests on all affected repositories---and tracks progress until they're all merged.
 
-## What are campaigns?
+The changes made by campaigns usually fit into a few general categories:
 
-Campaigns are part of [Sourcegraph code change management](https://about.sourcegraph.com/product/code-change-management) and let you make large-scale code changes across many repositories and different code hosts.
+- Cleaning up common problems using linters
+- Updating uses of deprecated library APIs
+- Upgrading dependencies
+- Patching critical security issues
+- Standardizing build, configuration, and deployment files
 
-You provide the code to make the change, and campaigns provide the plumbing to turn it into a large-scale code change campaign and monitor its progress.
+With campaigns, making large-scale changes becomes:
 
-<div class="text-center">
-  <iframe
-      width="560"
-      height="315"
-      src="https://www.youtube.com/embed/aqcCrqRB17w"
-      frameborder="0"
-      allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-      allowfullscreen="true"
-  ></iframe>
-</div>
+- Simpler: Just provide a script and select the repositories.
+- Easier to follow through on: You can track the progress of all pull requests, including checks and review statuses, to see where to help out and to confirm when everything's merged.
+- Less scary: You can preview everything, roll out changes gradually, and update all changes even after creation.
+- Collaborative: Other people can see all the changes, including those still in preview, in one place.
+
+> NOTE: Campaigns are in beta and currently support GitHub, GitHub Enterprise, and Bitbucket Server only.
+
+<!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
+
+## Creating a campaign
+
+## Specifying what changes to make
+
+## Example campaigns
+
+## Publishing branches and changesets to the code host
+
+## Monitoring campaign progress and changeset statuses
+
+## Updating a campaign
+
+## Tracking preexisting changesets
+
+## Closing or deleting a campaign
+
+## Campaign and repository permissions
 
 ## Are you a first time user of campaigns?
 
