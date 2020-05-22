@@ -336,6 +336,14 @@ func (r *campaignResolver) Status(ctx context.Context) (graphqlbackend.Backgroun
 	return r.store.GetCampaignStatus(ctx, r.Campaign.ID)
 }
 
+func (r *campaignResolver) ViewerCanAddRemoveExistingChangesets(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
+func (r *campaignResolver) ViewerCanUpdatePatches(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
 type changesetDiffsConnectionResolver struct {
 	*changesetsConnectionResolver
 }
