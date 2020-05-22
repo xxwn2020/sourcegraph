@@ -220,6 +220,8 @@ type CampaignResolver interface {
 	PublishedAt(ctx context.Context) (*DateTime, error)
 	Patches(ctx context.Context, args *graphqlutil.ConnectionArgs) PatchConnectionResolver
 	DiffStat(ctx context.Context) (*DiffStat, error)
+	ViewerCanAddRemoveExistingChangesets(context.Context) (bool, error)
+	ViewerCanUpdatePatches(context.Context) (bool, error)
 }
 
 type CampaignsConnectionResolver interface {
