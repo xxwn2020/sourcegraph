@@ -25,6 +25,8 @@ func (db *dbImpl) RepoUsageStatistics(ctx context.Context) ([]RepoUsageStatistic
 			counts.precise_count
 		FROM (
 			SELECT
+				-- Cut out repo portion of event url
+				-- e.g. https://{github.com/owner/repo}/-/rest-of-path
 				substring(url from '//[^/]+/(.+)/-/') AS repo_name,
 				COUNT(*) FILTER (WHERE name LIKE 'codeintel.search%%%%') AS search_count,
 				COUNT(*) FILTER (WHERE name LIKE 'codeintel.lsif%%%%') AS precise_count
@@ -32,7 +34,8 @@ func (db *dbImpl) RepoUsageStatistics(ctx context.Context) ([]RepoUsageStatistic
 			WHERE timestamp >= NOW() - INTERVAL '1 week'
 			GROUP BY repo_name
 		) counts
-		JOIN repo r ON r.uri = counts.repo_name
+		-- Cast allows use of the uri btree index
+		JOIN repo r ON r.uri = counts.repo_name::citext
 	`)))
 	if err != nil {
 		return nil, err
