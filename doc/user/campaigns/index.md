@@ -17,7 +17,7 @@ With campaigns, making large-scale changes becomes:
 - Less scary: You can preview everything, roll out changes gradually, and update all changes even after creation.
 - Collaborative: Other people can see all the changes, including those still in preview, in one place.
 
-> NOTE: Campaigns are in beta and currently support GitHub, GitHub Enterprise, and Bitbucket Server only.
+> NOTE: Campaigns are in beta. The currently supported code hosts are GitHub and Bitbucket Server.
 
 <!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
 
@@ -33,11 +33,31 @@ With campaigns, making large-scale changes becomes:
 
 ## Updating a campaign
 
-## Tracking preexisting changesets
+## Tracking existing changesets
 
 ## Closing or deleting a campaign
 
-## Campaign and repository permissions
+## [Managing access to campaigns](managing_access.md)
+
+See "[Managing access to campaigns](managing_access.md)".
+
+## Code host and repository permissions in campaigns
+
+All actions on the code host (such as pushing a branch or opening a changeset) are performed by your individual user account, not by a bot user. For more information, see "[Code host interactions in campaigns](managing_access.md#code-host-interactions-in-campaigns)".
+
+[Repository permissions](../../admin/repo/permission.md) are enforced when campaigns display information. For more information, see "[Repository permissions in campaigns](managing_access.md#repository-permissions-for-campaigns)".
+
+## Site admin configuration for campaigns
+
+Using campaigns requires a [code host connection](../../admin/external_service/index.md) to a supported code host (currently GitHub and Bitbucket Server).
+
+
+
+- [Enable 
+- [Configure repository permissions](../../admin/repo/permission.md), which campaigns will respect
+- [Disable campaigns for all users](managing_access.md#disabling-campaigns-for-all-users)
+
+---
 
 ## Are you a first time user of campaigns?
 
