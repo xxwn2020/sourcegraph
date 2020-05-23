@@ -1,14 +1,24 @@
 # Campaigns
 
-Campaigns let you make large-scale code changes. A campaign is like a cross-repository pull request. You create a campaign and tell it what changes to make (by providing a script to run). The campaign then creates pull requests on all affected repositories---and tracks progress until they're all merged.
+Campaigns let you make large-scale code changes across many repositories.
 
-The changes made by campaigns usually fit into a few general categories:
+> NOTE: Campaigns are in beta.
+
+## About campaigns
+
+A campaign streamlines the creation and tracking of pull requests across many repositories and code hosts. After you create a campaign, you tell it what changes to make (by providing a script that will run in each repository). The campaign lets you create pull requests on all affected repositories, and it tracks their progress until they're all merged. You can preview the changes and update them at any time.
+
+People usually use campaigns to make the following kinds of changes:
 
 - Cleaning up common problems using linters
 - Updating uses of deprecated library APIs
 - Upgrading dependencies
 - Patching critical security issues
 - Standardizing build, configuration, and deployment files
+
+<!-- TODO(sqs): link to about site for "why use campaigns?"
+
+Why use campaigns?
 
 With campaigns, making large-scale changes becomes:
 
@@ -17,11 +27,20 @@ With campaigns, making large-scale changes becomes:
 - Less scary: You can preview everything, roll out changes gradually, and update all changes even after creation.
 - Collaborative: Other people can see all the changes, including those still in preview, in one place.
 
-> NOTE: Campaigns are in beta. The currently supported code hosts are GitHub and Bitbucket Server.
+-->
+
+## Supported code hosts and changeset types
+
+A single campaign can span many repositories and many code hosts. The generic term **changeset** is used to refer to any of the following:
+
+- GitHub pull requests
+- Bitbucket Server pull requests
+- Bitbucket Cloud pull requests (not yet supported)
+- GitLab merge requests (not yet supported)
+- Phabricator diffs (not yet supported)
+- Gerrit changes (not yet supported)
 
 <!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
-
-<!-- TODO(sqs): define changesets (==PRs/MRs/diffs) -->
 
 ## Viewing campaigns
 
@@ -109,6 +128,14 @@ Site admins can also:
 - [Configure repository permissions](../../admin/repo/permission.md), which campaigns will respect
 - [Disable campaigns for all users](managing_access.md#disabling-campaigns-for-all-users)
 
+## Concepts
+
+- A **campaign** is group of related changes to code, along with a title and description.
+- You supply a set of **patches** to a campaign. Each patch is a unified diff describing changes to a specific commit and branch in a repository. (To produce the patches, you provide a script that runs in the root of each repository and changes files.)
+- The campaign converts the patches into **changesets**, which is a generic term for pull requests, merge requests, or any other reviewable chunk of code. (Code hosts use different terms for this, which is why we chose a generic term.)
+- Initially a changeset is just a **preview** and is not actually pushed to or created on the code host.
+- You **publish** a changeset when you're ready to push the branch and create the changeset on the code host.
+
 ## Roadmap
 
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
@@ -118,4 +145,5 @@ Site admins can also:
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
 
 - The only supported code hosts are GitHub and Bitbucket Server. Support for [all other code hosts](../../admin/external_service/index.md) is planned.
+- It is not yet possible for a campaign to have multiple changesets in a single repository (e.g., to make changes to multiple subtrees in a monorepo).
 - Forking a repository and creating a pull request on the fork is not yet supported. Because of this limitation, you need write access to each repository that your campaign will change (in order to push a branch to it).
