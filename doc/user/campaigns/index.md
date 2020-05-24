@@ -16,6 +16,8 @@ People usually use campaigns to make the following kinds of changes:
 - Patching critical security issues
 - Standardizing build, configuration, and deployment files
 
+For step-by-step instructions to create your first campaign, see [Hello Universe Campaign](TODO) in Sourcegraph Guides.
+
 <!-- TODO(sqs): link to about site for "why use campaigns?"
 
 Why use campaigns?
@@ -29,6 +31,8 @@ With campaigns, making large-scale changes becomes:
 
 -->
 
+<!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
+
 ## Supported code hosts and changeset types
 
 A single campaign can span many repositories and many code hosts. The generic term **changeset** is used to refer to any of the following:
@@ -40,31 +44,44 @@ A single campaign can span many repositories and many code hosts. The generic te
 - Phabricator diffs (not yet supported)
 - Gerrit changes (not yet supported)
 
-<!-- TODO(sqs): Add video here, similar to https://www.youtube.com/aqcCrqRB17w (which will need to be updated for the new campaign flow). -->
-
 ## Viewing campaigns
 
-<!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
+You can view a list of all campaigns by clicking the <img src="campaigns-icon.svg" alt="Campaigns icon" /> campaigns icon in the top navigation bar.
 
-## Creating a campaign
+Use the filters to switch between showing all campaigns, open campaigns, or closed campaigns.
 
-<!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
+## Creating a new campaign
 
-Any user can create a campaign.
+> **Creating your first campaign?** See [Hello Universe Campaign](TODO) in Sourcegraph Guides for step-by-step instructions.
+
+1. Click the <img src="campaigns-icon.svg" alt="Campaigns icon" /> campaigns icon in the top navigation bar.
+1. Click the **＋ New campaign** button.
+1. Type a name for your campaign. The name will be the title of each changeset (e.g., the pull request title).
+1. Type an optional description, which will be the description or body of each changeset.
+1. Choose a branch name (or use the suggested one). This is the branch on each repository where the campaign's changes will be pushed to.
+1. Click the **Create campaign** button.
+
+You've created a new campaign, but it doesn't have any changes yet. Next, you can [add patches to specify what changes to make](#adding-patches-to-specify-what-changes-to-make).
+
+If the changesets were already created (outside of campaigns), you can [track existing changesets](#tracking-existing-changesets) in your campaign.
 
 ## Adding patches to specify what changes to make
 
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
 
-After [creating a campaign](#creating-a-campaign), you can provide a list of patches. A patch is a change (in diff format) to a specific repository on a specific branch. The campaign will let you preview the changesets that will be created from the patches, and when you're ready, you can publish the changesets to the code hosts.
+After you've [created a campaign](#creating-a-new-campaign), you can tell it what changes to make by submitting a list of patches. A patch is a change (in diff format) to a specific repository on a specific branch.
+
+Don't worry! The campaign will show you a preview of all changesets (e.g., GitHub pull requests) that will be created from the patches. No repositories will be affected until you're ready and decide to publish the changesets.
 
 To provide a list of patches: <!-- TODO!(sqs) -->
 
+When you're ready, you can [publish the changesets](#publishing-branches-and-changesets-to-the-code-host), which will create commits with your changes, push a branch to each affected repository, and create changesets on the code host for review and merging.
+
 You can update a campaign's changes at any time, even after you've published changesets. For more information, see "[Updating a campaign](#updating-a-campaign)".
 
-## [Example campaigns](examples/index.md)
+### Example campaigns
 
-The [example campaigns](examples/index.md) show how to use campaigns for:
+The [example campaigns](examples/index.md) show how to use campaigns to make useful, real-world changes:
 
 * [Using ESLint to automatically migrate to a new TypeScript version](examples/eslint_typescript_version.md)
 * [Adding a GitHub action to upload LSIF data to Sourcegraph](examples/lsif_action.md)
