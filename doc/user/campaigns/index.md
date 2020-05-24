@@ -75,7 +75,7 @@ Don't worry! The campaign will show you a preview of all changesets (e.g., GitHu
 
 To provide a list of patches: <!-- TODO!(sqs) -->
 
-When you're ready, you can [publish the changesets](#publishing-branches-and-changesets-to-the-code-host), which will create commits with your changes, push a branch to each affected repository, and create changesets on the code host for review and merging.
+When you're ready, [publish the changesets](#publishing-changesets-to-the-code-host) to the code host.
 
 You can update a campaign's changes at any time, even after you've published changesets. For more information, see "[Updating a campaign](#updating-a-campaign)".
 
@@ -87,11 +87,17 @@ The [example campaigns](examples/index.md) show how to use campaigns to make use
 * [Adding a GitHub action to upload LSIF data to Sourcegraph](examples/lsif_action.md)
 * [Refactoring Go code using Comby](examples/refactor_go_comby.md)
 
-## Publishing branches and changesets to the code host
+## Publishing changesets to the code host
 
 <!-- TODO(sqs): This section is rough/incomplete/outline-only. -->
 
 A changeset in a campaign is an unpublished preview until you decide to publish it to the code host.
+
+When you're ready, you can **publish** the changesets, which will, for each affected repository:
+
+- Create a commit with your changes
+- Push a branch (using the branch name you chose when creating the campaign)
+- Create a changeset (e.g., GitHub pull request) on the code host for review and merging
 
 ## Monitoring campaign progress and changeset statuses
 
